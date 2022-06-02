@@ -4,3 +4,5 @@
 *.sym
 twoship/cc65
 elasticity/cc65
+elasticity/flicker*.png
+elasticity/residual*.png
