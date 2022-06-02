@@ -1,0 +1,6 @@
+*.o
+*.dbg
+*.map
+*.sym
+twoship/cc65
+elasticity/cc65
