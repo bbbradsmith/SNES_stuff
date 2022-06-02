@@ -9,6 +9,10 @@ Rebuild requirements:
 python 3 - gfx.py will rebuild the chr/pal/nmt assets
 cc65 - put it in a cc65 folder and run build.bat
 
+Notes:
+https://forums.nesdev.org/viewtopic.php?p=279303
+
+
 
 rainwarrior, 2022
 http://rainwarrior.ca

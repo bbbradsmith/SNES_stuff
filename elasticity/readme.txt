@@ -5,7 +5,7 @@ This ROM displays 4 versions of an image, press a button to switch:
 B - A pair of 3:3:2 images flickering to create a "4:4:3" image.
 Y - 256 colours, no-dither.
 A - 256 colours, Floyd-Steinberg dithering.
-X - A 3:3:2 image added to a 1:1:2 image to create a 4:4:4 image.
+X - A 3:3:2 image added to a 1:1:2 image to create a 4:4:4 image. (default)
 
 All images use Mode 3 in 8bpp indexed colour mode.
 Though the flicker version is 3:3:2 quantized, it is not using direct colour,
@@ -20,6 +20,10 @@ https://www.wikiart.org/en/umberto-boccioni/elasticity-1912
 Rebuild requirements:
 python 3 - gfx.py will rebuild the chr/pal assets
 cc65 - put it in a cc65 folder and run build.bat
+
+Notes:
+https://forums.nesdev.org/viewtopic.php?p=278742
+
 
 
 rainwarrior, 2022
