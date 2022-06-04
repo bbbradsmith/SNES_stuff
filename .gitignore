@@ -2,8 +2,10 @@
 *.dbg
 *.map
 *.sym
+*.lnk
 secrets
 twoship/cc65
+dizworld/cc65
 elasticity/cc65
 elasticity/flicker*.png
 elasticity/residual*.png
