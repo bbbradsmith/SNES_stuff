@@ -55,11 +55,22 @@ newpad:       .res 2
 nmi_ready:    .res 1
 nmi_count:    .res 1
 mode:         .res 1
-scroll_x:     .res 2
-scroll_y:     .res 2
+
+nmi_bgmode:   .res 1
+nmi_hofs:     .res 2
+nmi_vofs:     .res 2
+nmi_m7t:      .res 8
+nmi_m7x:      .res 2
+nmi_m7y:      .res 2
+
+new_hdma_en:  .res 1 ; HDMA channel enable at next update
+nmi_hdma_en:  .res 1 ; HDMA channel enable currently
 
 .segment "LORAM" ; <$2000
 .segment "HIRAM" ; $FE bank < $8000
+
+new_hdma: .res 16 * 8 ; HDMA channel settings to apply at next update
+nmi_hdma: .res 16 * 8 ; HDMA channel settings current
 
 .segment "RODATA" ; for data needed by code
 
@@ -126,6 +137,7 @@ nmi:
 	phx
 	phy
 	phb
+	phd
 	sep #$30
 	.a8
 	.i8
@@ -138,30 +150,87 @@ nmi:
 	bne :+
 		lda #$8F
 		sta $2100 ; force blanking on
+		stz z:nmi_hdma_en ; disable HDMA
 		stz z:nmi_ready
 		jmp @exit
 	:
 	; update
-	; TODO
-	lda z:scroll_x+0
-	sta $210D ; BG1HOFS
-	lda z:scroll_x+1
+	; 1. copy new HDMA settings
+	rep #$30
+	.a16
+	.i16
+	phb
+	ldx #.loword(new_hdma)
+	ldy #.loword(nmi_hdma)
+	lda #(16*8)-1
+	mvn #^new_hdma,#^nmi_hdma
+	plb
+	sep #$20
+	.a8
+	lda z:new_hdma_en
+	sta z:nmi_hdma_en
+	; 2. apply other settings
+	lda z:nmi_bgmode
+	sta $2105 ; BGMODE
+	lda z:nmi_hofs+0
+	sta $210D ; BG1HOFS / M7HOFS
+	lda z:nmi_hofs+1
 	sta $210D
-	lda z:scroll_y+0
-	sta $210E ; BG1VOFS
-	lda z:scroll_y+1
+	lda z:nmi_vofs+0
+	sta $210E ; BG1VOFS / M7VOFS
+	lda z:nmi_vofs+1
 	sta $210E
+	lda z:nmi_m7t+0
+	sta $211B ; M7A
+	lda z:nmi_m7t+1
+	sta $211B
+	lda z:nmi_m7t+2
+	sta $211C ; M7B
+	lda z:nmi_m7t+3
+	sta $211C
+	lda z:nmi_m7t+4
+	sta $211D ; M7C
+	lda z:nmi_m7t+5
+	sta $211D
+	lda z:nmi_m7t+6
+	sta $211E ; M7D
+	lda z:nmi_m7t+7
+	sta $211E
+	lda z:nmi_m7x+0
+	sta $211F ; M7E
+	lda z:nmi_m7x+1
+	sta $211F
+	lda z:nmi_m7y+0
+	sta $2120 ; M7F
+	lda z:nmi_m7y+1
+	sta $2120
 	; force blanking off
 	lda #$0F
 	sta $2100
 	stz z:nmi_ready
 	; next field
-	inc z:nmi_count
 @exit:
+	; copy HDMA settings and execute
+	rep #$30
+	.a16
+	.i16
+	phb
+	ldx #.loword(nmi_hdma)
+	ldy #$4300
+	lda #(16*8)-1
+	mvn #^nmi_hdma,#^004300
+	plb
+	sep #$20
+	.a8
+	lda z:nmi_hdma_en
+	sta $420C
+	; count frames
+	inc z:nmi_count
 	; restore registers
 	rep #$30
 	.a16
 	.i16
+	pld
 	plb
 	ply
 	plx
@@ -267,6 +336,28 @@ reset:
 	stz $420B
 	stz $420C
 	stz $420D
+	; TODO fastROM
+	; clear RAM
+	lda #0
+	sta f:$7E0000 ; 0 byte to pattern-fill with MVN
+	sta f:$7F0000
+	rep #$30
+	.a16
+	.i16
+	phb
+	ldx #0
+	ldy #1
+	lda #$10000-2
+	mvn #$7E,#$7E
+	ldx #0
+	ldy #1
+	lda #$10000-2
+	mvn #$7F,#$7F
+	plb
+	sep #$30
+	.a8
+	.i8
+	; TODO use a16,i8 instead?
 	; load vram
 	stz $2116 ; VMADD $0000
 	stz $2117
@@ -352,18 +443,6 @@ reset:
 	lda #$11
 	sta $212C ; TM OBJ + BG1 main-screen
 	stz $212D ; TS empty sub-screen
-	; setup variables
-	stz z:nmi_ready
-	stz z:nmi_count
-	stz z:gamepad+0
-	stz z:gamepad+1
-	stz z:lastpad+0
-	stz z:lastpad+1
-	stz z:mode
-	stz z:scroll_x+0
-	stz z:scroll_x+1
-	stz z:scroll_y+0
-	stz z:scroll_y+1
 	; begin
 	jmp run
 
@@ -372,87 +451,198 @@ reset:
 ;
 
 run:
-	; TODO (should actually be an HDMA so it can be turned on mid-screen)
-	lda #7
-	sta $2105 ; BGMODE 7
+	.a8
+	.i8
 	; enable NMI and auto-joypad
+	lda $4210 ; RDNMI
 	lda #$81
-	sta $4200
+	sta $4200 ; NMITIMEN
+	rep #$20
+	sep #$10
+	.a16
+	.i8
+	; reset mode 7 transform matrix to identity (1,0) (0,1)
+	ldx #$01
+	stx nmi_m7t+1
+	stx nmi_m7t+7
+	jsr set_mode_a
 @loop:
 	; post a render update
-	lda #1
-	sta z:nmi_ready
+	ldx #1
+	stx z:nmi_ready
 	wai
 	:
-		lda z:nmi_ready
+		ldx z:nmi_ready
 		bne :-
 	; read controllers
-	lda z:gamepad+0
-	sta z:lastpad+0
-	lda z:gamepad+1
-	sta z:lastpad+1
+	lda z:gamepad
+	sta z:lastpad
 	; wait for auto-read to finish
 	:
-		lda $4212 ; HBVJOY
+		lda $4212 ; HBVJOY (+RDIO)
 		and #1
 		bne :-
-	lda $4218 ; JOY1H
-	sta z:gamepad+0
-	eor z:lastpad+0
-	and z:gamepad+0
-	sta z:newpad+0
-	lda $4219 ; JOY1L
-	sta z:gamepad+1
-	eor z:lastpad+1
-	and z:gamepad+1
-	sta z:newpad+1
-	; TODO stuff
-	; as a test just toggle mode 1 vs mode 7:
-	lda z:newpad+1
-	and #$40 ; Y
-	beq :+
-		lda #1
-		sta $2105 ; BGMODE 1
-	:
-	lda z:newpad+1
-	and #$80 ; B
-	beq :+
-		lda #7
-		sta $2105 ; BGMODE 7
-	:
-	lda z:gamepad+1
-	and #$01 ; right
-	beq :+
-		inc z:scroll_x+0
-		bne :+
-		inc z:scroll_x+1
-	:
-	lda z:gamepad+1
-	and #$04 ; down
-	beq :+
-		inc z:scroll_y+0
-		bne :+
-		inc z:scroll_y+1
-	:
-	lda z:gamepad+1
-	and #$02 ; left
-	beq :++
-		lda z:scroll_x+0
-		bne :+
-			dec z:scroll_x+1
-		:
-		dec z:scroll_x+0
-	:
-	lda z:gamepad+1
-	and #$08 ; up
-	beq :++
-		lda z:scroll_y+0
-		bne :+
-			dec z:scroll_y+1 
-		:
-		dec z:scroll_y+0
-	:
+	lda $4218 ; JOY1
+	sta z:gamepad
+	eor z:lastpad
+	and z:gamepad
+	sta z:newpad
+	; switch mode
+	lda z:newpad
+	and #$0080 ; A
+	bne @set_mode_a
+	lda z:newpad
+	and #$8000 ; B
+	bne @set_mode_b
+	lda z:newpad
+	and #$0040 ; X
+	bne @set_mode_x
+	lda z:newpad
+	and #$4000 ; Y
+	bne @set_mode_y
+	; dispatch mode
+	ldx z:mode
+	beq @mode_a
+	cpx #1
+	beq @mode_b
+	cpx #2
+	beq @mode_x
+	cpx #3
+	beq @mode_y
+	; fallthrough?
+	ldx #0
+	stx z:mode
+@mode_a:
+	jsr mode_a
+	bra @loop
+@mode_b:
+	jsr mode_b
+	bra @loop
+@mode_x:
+	jsr mode_x
+	bra @loop
+@mode_y:
+	jsr mode_y
+	bra @loop
+@set_mode_a:
+	ldx #0
+	stx z:mode
+	jsr set_mode_a
+	bra @loop
+@set_mode_b:
+	ldx #1
+	stx z:mode
+	jsr set_mode_b
+	bra @loop
+@set_mode_x:
+	ldx #2
+	stx z:mode
+	jsr set_mode_x
+	bra @loop
+@set_mode_y:
+	ldx #3
+	stx z:mode
+	jsr set_mode_y
 	jmp @loop
+
+;
+; Common
+;
+
+simple_scroll:
+	.a16
+	lda z:gamepad
+	and #$0100 ; right
+	beq :+
+		inc z:nmi_hofs
+	:
+	lda z:gamepad
+	and #$0200 ; left
+	beq :+
+		dec z:nmi_hofs
+	:
+	lda z:gamepad
+	and #$0400 ; down
+	beq :+
+		inc z:nmi_vofs
+	:
+	lda z:gamepad
+	and #$0800 ; up
+	beq :+
+		dec z:nmi_vofs
+	:
+	rts
+
+;
+; Mode A test "Overhead, simple"
+; - Map spins around a fixed point
+; - Player moves over the rotated map
+; - L/R apply scale?
+;
+
+set_mode_a:
+	.a16
+	.i8
+	ldx #7
+	stx z:nmi_bgmode
+	ldx #0
+	stx new_hdma_en
+mode_a:
+	; TODO spin around a fixed point
+	jmp simple_scroll
+
+;
+; Mode B test "Overhead, first person"
+; - Map rotates around the player
+; - Player faces "up", and controls spin
+;
+
+set_mode_b:
+	.a16
+	.i8
+	ldx #7
+	ldx #0 ; mode 0 HACK
+	stx z:nmi_bgmode
+	ldx #0
+	stx new_hdma_en
+mode_b:
+	jsr simple_scroll ; TODO
+	rts
+
+;
+; Mode X test "Tilted plane"
+; - Map appears with perspective tilt, 1:1 at player centre
+; - Player moves only orthogonally
+; - L/R adjusts tilt amount?
+;
+
+set_mode_x:
+	.a16
+	.i8
+	ldx #7
+	ldx #3 ; mode 3 HACK
+	stx z:nmi_bgmode
+	ldx #0
+	stx new_hdma_en
+mode_x:
+	jmp simple_scroll
+
+;
+; Mode Y test "Flying"
+; - Mode 1 clouds at top, fixed colour horizon fades
+; - Map rotates around the player
+;
+
+set_mode_y:
+	.a16
+	.i8
+	ldx #1
+	stx z:nmi_bgmode
+	ldx #0
+	stx new_hdma_en
+mode_y:
+	jsr simple_scroll ; TODO
+	rts
 
 ;
 ; MAIN segment: flat HiROM space for more code, bulk data, etc.
