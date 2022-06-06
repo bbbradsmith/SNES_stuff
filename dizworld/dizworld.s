@@ -56,6 +56,16 @@ nmi_ready:    .res 1
 nmi_count:    .res 1
 mode:         .res 1
 
+pause:        .res 1
+angle:        .res 1 ; for spinning modes
+scale:        .res 2 ; for uniform scale
+
+cosa:         .res 2 ; sincos result
+sina:         .res 2
+mul32a:       .res 2 ; 32 multiply terms and product
+mul32b:       .res 2
+mul32ab:      .res 4
+
 nmi_bgmode:   .res 1
 nmi_hofs:     .res 2
 nmi_vofs:     .res 2
@@ -74,33 +84,17 @@ nmi_hdma: .res 16 * 8 ; HDMA channel settings current
 
 .segment "RODATA" ; for data needed by code
 
-;
-; Macros
-;
-
-; macros for switching between RODATA and RAM data banks (.a8 assumed)
-
 .import __RODATA_LOAD__
 .import __RODATA_SIZE__
 .assert (^__RODATA_LOAD__) = (^(__RODATA_LOAD__ + __RODATA_SIZE__)), error, "RODATA cannot cross a bank"
 
-.macro DB_RODATA
-	lda #^__RODATA_LOAD__
-	pha
-	plb
-.endmacro
+BANK_RODATA = ^__RODATA_LOAD__
 
-.macro DB_RAM
-	lda #$7E
-	pha
-	plb
-.endmacro
+;
+; Macros
+;
 
-.macro DB_ZERO
-	lda #0
-	pha
-	plb
-.endmacro
+; TODO
 
 ;
 ; START stub for bank $00 dispatch
@@ -141,7 +135,9 @@ nmi:
 	sep #$30
 	.a8
 	.i8
-	DB_ZERO
+	lda #$00
+	pha
+	plb ; set data bank $00 for hardware access
 	lda z:nmi_ready ; no pending update
 	bne :+
 		jmp @exit
@@ -487,6 +483,15 @@ run:
 	eor z:lastpad
 	and z:gamepad
 	sta z:newpad
+	; pausing
+	lda z:newpad
+	and #$1000
+	beq :+
+		lda z:pause
+		eor #1
+		tax
+		stx z:pause
+	:
 	; switch mode
 	lda z:newpad
 	and #$0080 ; A
@@ -528,17 +533,17 @@ run:
 	ldx #0
 	stx z:mode
 	jsr set_mode_a
-	bra @loop
+	jmp @loop
 @set_mode_b:
 	ldx #1
 	stx z:mode
 	jsr set_mode_b
-	bra @loop
+	jmp @loop
 @set_mode_x:
 	ldx #2
 	stx z:mode
 	jsr set_mode_x
-	bra @loop
+	jmp @loop
 @set_mode_y:
 	ldx #3
 	stx z:mode
@@ -549,7 +554,53 @@ run:
 ; Common
 ;
 
-simple_scroll:
+sincos: ; A = angle 0-255, result in cosa/sina, clobbers A/X
+	.a16
+	.i8
+	rep #$10
+	.i16
+	asl
+	tax
+	lda f:sincos_table, X
+	sta z:cosa
+	txa
+	clc
+	adc #(192*2) ; sin(x) = cos(x + 3/4 turn)
+	and #(256*2)-1
+	tax
+	lda f:sincos_table, X
+	sta z:sina
+	sep #$10
+	.i8
+	rts
+
+sincos_table:
+.word $0100,$0100,$0100,$00FF,$00FF,$00FE,$00FD,$00FC,$00FB,$00FA,$00F8,$00F7,$00F5,$00F3,$00F1,$00EF
+.word $00ED,$00EA,$00E7,$00E5,$00E2,$00DF,$00DC,$00D8,$00D5,$00D1,$00CE,$00CA,$00C6,$00C2,$00BE,$00B9
+.word $00B5,$00B1,$00AC,$00A7,$00A2,$009D,$0098,$0093,$008E,$0089,$0084,$007E,$0079,$0073,$006D,$0068
+.word $0062,$005C,$0056,$0050,$004A,$0044,$003E,$0038,$0032,$002C,$0026,$001F,$0019,$0013,$000D,$0006
+.word $0000,$FFFA,$FFF3,$FFED,$FFE7,$FFE1,$FFDA,$FFD4,$FFCE,$FFC8,$FFC2,$FFBC,$FFB6,$FFB0,$FFAA,$FFA4
+.word $FF9E,$FF98,$FF93,$FF8D,$FF87,$FF82,$FF7C,$FF77,$FF72,$FF6D,$FF68,$FF63,$FF5E,$FF59,$FF54,$FF4F
+.word $FF4B,$FF47,$FF42,$FF3E,$FF3A,$FF36,$FF32,$FF2F,$FF2B,$FF28,$FF24,$FF21,$FF1E,$FF1B,$FF19,$FF16
+.word $FF13,$FF11,$FF0F,$FF0D,$FF0B,$FF09,$FF08,$FF06,$FF05,$FF04,$FF03,$FF02,$FF01,$FF01,$FF00,$FF00
+.word $FF00,$FF00,$FF00,$FF01,$FF01,$FF02,$FF03,$FF04,$FF05,$FF06,$FF08,$FF09,$FF0B,$FF0D,$FF0F,$FF11
+.word $FF13,$FF16,$FF19,$FF1B,$FF1E,$FF21,$FF24,$FF28,$FF2B,$FF2F,$FF32,$FF36,$FF3A,$FF3E,$FF42,$FF47
+.word $FF4B,$FF4F,$FF54,$FF59,$FF5E,$FF63,$FF68,$FF6D,$FF72,$FF77,$FF7C,$FF82,$FF87,$FF8D,$FF93,$FF98
+.word $FF9E,$FFA4,$FFAA,$FFB0,$FFB6,$FFBC,$FFC2,$FFC8,$FFCE,$FFD4,$FFDA,$FFE1,$FFE7,$FFED,$FFF3,$FFFA
+.word $0000,$0006,$000D,$0013,$0019,$001F,$0026,$002C,$0032,$0038,$003E,$0044,$004A,$0050,$0056,$005C
+.word $0062,$0068,$006D,$0073,$0079,$007E,$0084,$0089,$008E,$0093,$0098,$009D,$00A2,$00A7,$00AC,$00B1
+.word $00B5,$00B9,$00BE,$00C2,$00C6,$00CA,$00CE,$00D1,$00D5,$00D8,$00DC,$00DF,$00E2,$00E5,$00E7,$00EA
+.word $00ED,$00EF,$00F1,$00F3,$00F5,$00F7,$00F8,$00FA,$00FB,$00FC,$00FD,$00FE,$00FF,$00FF,$0100,$0100
+;import math
+;vt = [round(256*math.cos(i*math.pi/128)) for i in range(256)]
+;for y in range(16):
+;    s = ".word "
+;    for x in range(16):
+;        s += "$%04X" % (vt[x+(y*16)] & 0xFFFF)
+;        if x < 15: s += ","
+;    print(s)
+
+simple_scroll: ; UDLR = hofs/vofs
 	.a16
 	lda z:gamepad
 	and #$0100 ; right
@@ -573,12 +624,47 @@ simple_scroll:
 	:
 	rts
 
+simple_rot_scale: ; LR shoulder = scale adjust, build ABCD from angle/scale
+	.a16
+	.i8
+	; scale adjust
+	lda z:gamepad
+	and #$0020 ; L shoulder
+	beq :+
+		dec z:scale
+	:
+	lda z:gamepad
+	and #$0010 ; R shoulder
+	beq :+
+		inc z:scale
+	:
+	; look up angle vectors
+	lda #0
+	ldx z:angle
+	txa
+	jsr sincos
+	; TODO apply uniform scale to cosa/sina
+	; clockwise (map-space) rotation matrix
+	lda z:cosa
+	sta z:nmi_m7t+0 ; A = cos
+	sta z:nmi_m7t+6 ; D = cos
+	lda z:sina
+	sta z:nmi_m7t+2 ; B = sin
+	eor #$FFFF
+	inc
+	sta z:nmi_m7t+4 ; C = -sin
+	rts
+
 ;
 ; Mode A test "Overhead, simple"
 ; - Map spins around a fixed point
 ; - Player moves over the rotated map
-; - L/R apply scale?
+; - L/R apply scale
 ;
+
+; pivot point for centre of the spin
+MODE_A_PX = 152
+MODE_A_PY = 120
 
 set_mode_a:
 	.a16
@@ -586,27 +672,73 @@ set_mode_a:
 	ldx #7
 	stx z:nmi_bgmode
 	ldx #0
-	stx new_hdma_en
+	stx z:new_hdma_en
+	stx z:angle
+	lda #$0100
+	sta z:scale
+	lda #MODE_A_PX
+	sta z:nmi_m7x
+	lda #MODE_A_PY
+	sta z:nmi_m7y
+	stz z:nmi_hofs
+	stz z:nmi_vofs
 mode_a:
-	; TODO spin around a fixed point
+	; spin
+	lda #0
+	ldx z:angle
+	ldy z:pause
+	bne :+
+		inx
+		stx z:angle
+	:
+	jsr simple_rot_scale
 	jmp simple_scroll
+	; TODO sprite pinned to tilemap
+	; TODO A/B/C/D/Px/Py/Ox/Oy sprite display
 
 ;
 ; Mode B test "Overhead, first person"
 ; - Map rotates around the player
 ; - Player faces "up", and controls spin
+; - L/R apply scale
 ;
 
 set_mode_b:
 	.a16
 	.i8
 	ldx #7
-	ldx #0 ; mode 0 HACK
 	stx z:nmi_bgmode
 	ldx #0
 	stx new_hdma_en
+	stx z:angle
+	lda #$0100
+	sta z:scale
+	; TODO use m7x/m7y as Tx/Ty player centre
+	lda #MODE_A_PX
+	sta z:nmi_m7x
+	lda #MODE_A_PY
+	stz z:nmi_hofs
+	stz z:nmi_vofs
 mode_b:
-	jsr simple_scroll ; TODO
+	; rotate with left/right
+	ldx z:angle
+	lda z:gamepad
+	and #$0200 ; left
+	beq :+
+		dex
+	:
+	lda z:gamepad
+	and #$0100 ; right
+	beq :+
+		inx
+	:
+	stx z:angle
+	; scale with L/R, generate rotation matrix
+	jsr simple_rot_scale
+	; TODO up/down moves player Tx/Ty according to matrix (just add m7b,m7d to tx,ty)
+	; TODO transform Tx,Ty into hofs/vofs
+	jsr simple_scroll ; HACK dont do this
+	stz z:nmi_hofs ; cancel this for now
 	rts
 
 ;
