@@ -11,3 +11,10 @@ Just a random collection of small SNES programs. Demonstrations and experiments.
 * **[twoship](twoship)** (2022-05-19)
   * Demonstration of high resolution Mode 5 graphics.
   * ROM: [twoship.sfc](../../raw/main/twoship/twoship.sfc)
+
+* **[dizworld](dizworld)** (work in progress)
+  * Demonstration of practical uses for Mode 7 graphics
+
+* **[multest](multest)** (2022-06-06)
+  * Test of hardware multiply algorithm
+  * ROM: [multest.sfc](../../raw/main/multest/multest.sfc)
