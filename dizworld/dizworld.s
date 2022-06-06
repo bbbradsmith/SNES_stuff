@@ -14,7 +14,7 @@
 
 .segment "HEADER"
 .byte "DIZWORLD MODE 7 DEMO "
-.byte $21 ; map mode (HiROM)
+.byte $31 ; map mode (HiROM, FastROM)
 .byte $00 ; cartridge type (ROM only)
 .byte $08 ; 2mbit (256k)
 .byte $00 ; RAM size
@@ -56,15 +56,17 @@ nmi_ready:    .res 1
 nmi_count:    .res 1
 mode:         .res 1
 
-pause:        .res 1
+pause:        .res 1 ; pauses animation
+aspect:       .res 1 ; 8:7 aspect correction
 angle:        .res 1 ; for spinning modes
 scale:        .res 2 ; for uniform scale
 
 cosa:         .res 2 ; sincos result
 sina:         .res 2
-mul32a:       .res 2 ; 32 multiply terms and product
-mul32b:       .res 2
-mul32ab:      .res 4
+mul16a:       .res 2 ; 16-bit multiply terms and 32-bit product
+mul16b:       .res 2
+mul16ab:      .res 4
+temp:         .res 4
 
 nmi_bgmode:   .res 1
 nmi_hofs:     .res 2
@@ -331,8 +333,9 @@ reset:
 	stz $420A
 	stz $420B
 	stz $420C
-	stz $420D
-	; TODO fastROM
+	;stz $420D
+	lda #1
+	sta $420D ; FastROM
 	; clear RAM
 	lda #0
 	sta f:$7E0000 ; 0 byte to pattern-fill with MVN
@@ -492,6 +495,15 @@ run:
 		tax
 		stx z:pause
 	:
+	; aspect ratio correction
+	lda z:newpad
+	and #$2000
+	beq :+
+		lda z:aspect
+		eor #1
+		tax
+		stx z:aspect
+	:
 	; switch mode
 	lda z:newpad
 	and #$0080 ; A
@@ -519,16 +531,16 @@ run:
 	stx z:mode
 @mode_a:
 	jsr mode_a
-	bra @loop
+	jmp @loop
 @mode_b:
 	jsr mode_b
-	bra @loop
+	jmp @loop
 @mode_x:
 	jsr mode_x
-	bra @loop
+	jmp @loop
 @mode_y:
 	jsr mode_y
-	bra @loop
+	jmp @loop
 @set_mode_a:
 	ldx #0
 	stx z:mode
@@ -553,6 +565,85 @@ run:
 ;
 ; Common
 ;
+
+; unsigned 16-bit multiply, 32-bit result
+; Written by 93143: https://forums.nesdev.org/viewtopic.php?p=280007#p280007
+mul16: ; mul16a x mul16b = mul16ab, clobbers A/X/Y
+	; DB = 0
+	.a16
+	.i8
+	ldx z:mul16a+0
+	stx $4202
+	ldy z:mul16b+0
+	sty $4203         ; a0 x b0 (A)
+	ldy z:mul16b+1
+	stz z:mul16ab+2
+	lda $4216
+	sta z:mul16ab+0   ; 00AA
+	sty $4203         ; a0 x b1 (B)
+	ldx z:mul16a+1
+	ldy z:mul16b+0
+	lda $4216
+	stx $4202
+	sty $4203         ; a1 x b0 (C)
+	clc
+	adc z:mul16ab+1   ; 00AA + 0BB0 (can't set carry because high byte was 0)
+	ldy z:mul16b+1
+	adc $4216
+	sty $4203         ; a1 x b1 (D)
+	sta z:mul16ab+1   ; 00AA + 0BB0 + 0CC0
+	lda z:mul16ab+2
+	bcc :+
+	adc #$00FF        ; if carry, increment top byte
+:
+	adc $4216
+	sta z:mul16ab+2   ; 00AA + 0BB0 + 0CC0 + DD00
+	rts
+
+; signed 16-bit multiply, 32-bit result, clobbers mul16a/mul16b/temp/A/X/Y
+smul16:
+	.a16
+	.i8
+	stz z:temp ; stores sign result
+	; invert terms if negative, remember parity for result
+	lda z:mul16a
+	bpl :+
+		inc z:temp
+		lda #0
+		sec
+		sbc z:mul16a
+		sta z:mul16a
+	:
+	lda z:mul16b
+	bpl :+
+		inc z:temp
+		lda #0
+		sec
+		sbc z:mul16b
+		sta z:mul16b
+	:
+	; do unsigned multiply
+	jsr mul16
+	; if exactly 1 of the terms was negative, invert the result
+	lda z:temp
+	cmp #1
+	bne :+
+		lda #0
+		sec
+		sbc z:mul16ab+0
+		sta z:mul16ab+0
+		lda #0
+		sbc z:mul16ab+2
+		sta z:mul16ab+2
+	:
+	rts
+
+smul16f: ; smul16 but returning the middle 16-bit value as A (i.e. 8.8 fixed point multiply)
+	.a16
+	.i8
+	jsr smul16
+	lda z:mul16ab+1
+	rts
 
 sincos: ; A = angle 0-255, result in cosa/sina, clobbers A/X
 	.a16
@@ -631,19 +722,31 @@ simple_rot_scale: ; LR shoulder = scale adjust, build ABCD from angle/scale
 	lda z:gamepad
 	and #$0020 ; L shoulder
 	beq :+
-		dec z:scale
+		inc z:scale
 	:
 	lda z:gamepad
 	and #$0010 ; R shoulder
 	beq :+
-		inc z:scale
+		dec z:scale
 	:
 	; look up angle vectors
 	lda #0
 	ldx z:angle
 	txa
 	jsr sincos
-	; TODO apply uniform scale to cosa/sina
+	; apply uniform scale
+	lda z:scale
+	sta z:mul16a
+	lda z:cosa
+	sta z:mul16b
+	jsr smul16f
+	sta z:cosa
+	lda z:scale
+	sta z:mul16a
+	lda z:sina
+	sta z:mul16b
+	jsr smul16f
+	sta z:sina
 	; clockwise (map-space) rotation matrix
 	lda z:cosa
 	sta z:nmi_m7t+0 ; A = cos
@@ -653,6 +756,22 @@ simple_rot_scale: ; LR shoulder = scale adjust, build ABCD from angle/scale
 	eor #$FFFF
 	inc
 	sta z:nmi_m7t+4 ; C = -sin
+	; aspect ratio correction if select is pressed
+	ldx z:aspect
+	beq :+
+		lda #(256*8/7)
+		sta z:mul16a
+		lda z:nmi_m7t+0
+		sta z:mul16b
+		jsr smul16f
+		sta z:nmi_m7t+0 ; A *= 8/7
+		lda #(256*8/7)
+		sta z:mul16a
+		lda z:nmi_m7t+4
+		sta z:mul16b
+		jsr smul16f
+		sta z:nmi_m7t+4 ; C *= 8/7
+	:
 	rts
 
 ;
