@@ -12,6 +12,19 @@ A/B/Y/X = select sprite to move
 d-pad = move sprite
 
 
+Expected results:
+- Indexed BG2
+  * Sprites 0,1 in between, 2,3 on top.
+  * Layer strips 0 and 1 have identical colours (indicates high bit of palette is forced to 0 on BG2).
+- Direct BG2
+  * Direct colour disallowed, indexed colours on DC data. (Grey with green, yellow, and cyan streaks.)
+- Indexed BG1
+  * Sprite 0 behind, 1,2,3 on top.
+  * "Layer 1" strip is slightly dim (indicates using full 8bpp palette, not just 7bpp).
+- Direct BG1
+  * Like indexed BG1 but slightly darker due to reduced range of direct color.
+
+
 Rebuild requirements:
 python 3 - gfx.py will rebuild the chr/pal assets
 cc65 - put it in a cc65 folder and run build.bat
