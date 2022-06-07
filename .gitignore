@@ -10,3 +10,4 @@ elasticity/cc65
 elasticity/flicker*.png
 elasticity/residual*.png
 multest/cc65
+extbgtest/cc65

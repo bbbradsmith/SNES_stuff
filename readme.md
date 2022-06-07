@@ -18,3 +18,7 @@ Just a random collection of small SNES programs. Demonstrations and experiments.
 * **[multest](multest)** (2022-06-06)
   * Test of hardware multiply algorithm
   * ROM: [multest.sfc](../../raw/main/multest/multest.sfc)
+
+* **[extbgtest](extbgtest)** (2022-06-06)
+  * Test of Mode 7 EXTBG
+  * ROM: [extbgtest.sfc](../../raw/main/extbgtest/extbgtest.sfc)
