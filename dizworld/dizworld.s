@@ -80,9 +80,10 @@ scale2:       .res 4 ; for separate axis scale
 
 cosa:         .res 2 ; sincos result
 sina:         .res 2
-mul16a:       .res 2 ; 16-bit multiply terms and 32-bit product
-mul16b:       .res 2
-prod32:       .res 4
+math_a:       .res 4 ; multiply/divide/math input terms 16 or 32-bit
+math_b:       .res 4
+math_p:       .res 4 ; product/quotient
+math_r:       .res 4 ; remainder
 temp:         .res 8
 
 det_r:        .res 2 ; storage for 1 / AD-BC
@@ -710,14 +711,7 @@ oamp_hex8: ; A = value to print in hex
 oamp_hex16: ; A = 16-bit value to print in hex
 	.a16
 	pha
-	lsr
-	lsr
-	lsr
-	lsr
-	lsr
-	lsr
-	lsr
-	lsr
+	xba
 	jsr oamp_hex8
 	pla
 	jmp oamp_hex8
@@ -732,119 +726,164 @@ oamp_hex16_space:
 
 ; unsigned 16-bit multiply, 32-bit result
 ; Written by 93143: https://forums.nesdev.org/viewtopic.php?p=280007#p280007
-umul16: ; mul16a x mul16b = prod32, clobbers A/X/Y
+umul16: ; math_a x math_b = math_p, clobbers A/X/Y
 	; DB = 0
 	.a16
 	.i8
-	ldx z:mul16a+0
+	ldx z:math_a+0
 	stx $4202
-	ldy z:mul16b+0
+	ldy z:math_b+0
 	sty $4203         ; a0 x b0 (A)
-	ldy z:mul16b+1
-	stz z:prod32+2
+	ldy z:math_b+1
+	stz z:math_p+2
 	lda $4216
-	sta z:prod32+0    ; 00AA
+	sta z:math_p+0    ; 00AA
 	sty $4203         ; a0 x b1 (B)
-	ldx z:mul16a+1
-	ldy z:mul16b+0
+	ldx z:math_a+1
+	ldy z:math_b+0
 	lda $4216
 	stx $4202
 	sty $4203         ; a1 x b0 (C)
 	clc
-	adc z:prod32+1    ; 00AA + 0BB0 (can't set carry because high byte was 0)
-	ldy z:mul16b+1
+	adc z:math_p+1    ; 00AA + 0BB0 (can't set carry because high byte was 0)
+	ldy z:math_b+1
 	adc $4216
 	sty $4203         ; a1 x b1 (D)
-	sta z:prod32+1    ; 00AA + 0BB0 + 0CC0
-	lda z:prod32+2
+	sta z:math_p+1    ; 00AA + 0BB0 + 0CC0
+	lda z:math_p+2
 	bcc :+
 	adc #$00FF        ; if carry, increment top byte
 :
 	adc $4216
-	sta z:prod32+2    ; 00AA + 0BB0 + 0CC0 + DD00
+	sta z:math_p+2    ; 00AA + 0BB0 + 0CC0 + DD00
 	rts
 
-; signed 16-bit multiply, 32-bit result, clobbers mul16a/mul16b/temp+0/A/X/Y
+; signed 16-bit multiply, 32-bit result, clobbers A/X/Y
 smul16:
 	.a16
 	.i8
-	stz z:temp ; stores sign result
-	; invert terms if negative, remember parity for result
-	lda z:mul16a
-	bpl :+
-		eor #$FFFF
-		inc
-		sta z:mul16a
-		inc z:temp
-	:
-	lda z:mul16b
-	bpl :+
-		eor #$FFFF
-		inc
-		sta z:mul16b
-		inc z:temp
-	:
-	; do unsigned multiply
 	jsr umul16
-	; if exactly 1 of the terms was negative, invert the result
-	lda z:temp
-	cmp #1
-	bne :+
-		lda #0
-		sec
-		sbc z:prod32+0
-		sta z:prod32+0
-		lda #0
-		sbc z:prod32+2
-		sta z:prod32+2
+	; A = math_p+2
+	; X = math_a+1
+	; Y = math_b+1
+	cpx #$80
+	bcc :+
+		;sec
+		sbc z:math_b ; sign extend math_a: (-1 << 16) x math_b
 	:
+	cpy #$80
+	bcc :+
+		;sec
+		sbc z:math_a ; sign extend math_b: (-1 << 16) x math_a
+	:
+	sta z:math_p+2
 	rts
 
 smul16f: ; smul16 but returning the middle 16-bit value as A (i.e. 8.8 fixed point multiply)
 	.a16
 	.i8
 	jsr smul16
-	lda z:prod32+1
+	lda z:math_p+1
 	rts
 
-; TODO
-; this doesn't quite work, recip of 2 ($0200) = 0?
-recip16f: ; A = fixed point number, clobbers A/X/Y/temp0-6/mul16a/mul16b/prod32
+; 16-bit / 16-bit division, 16 + 16 result
+; math_a / math_b = math_p
+; math_a % math_b = math_r
+; clobbers A/X
+udiv16:
 	.a16
 	.i8
-	;
-	; newton-rhapson reciprocal approximation
-	; iterates: x <- x * (2 - a * x)
-	;
-	; There might be a faster method using hardware divide? This works for now.
-	;
-	@ITERATIONS = 6
-	sta z:temp+4 ; temp+4 = a
-	sta z:mul16a ; mul16a = a
-	ldx #@ITERATIONS
-	stx z:temp+2 ; temp+2 = iterations
-	ldx #0
-	stx z:temp+3 ; for 16-bit decrement
-	lda #(2*256)
-	sec
-	sbc z:temp+4 ; 2-a = 1st iteration result if first guess for x=1
-	sta z:mul16b
-	bra @start
-@loop: ; A = best guess (x)
-	sta z:mul16b
-	lda z:temp+4 ; a
-	sta z:mul16a
-@start: ; mul16a = a, mul16b = best guess (x)
-	jsr smul16 ; a*x
-	lda #(2*256)
-	sec
-	sbc z:prod32+1
-	sta z:mul16a ; 2 - a*x
-	jsr smul16f ; (2 - a*x) * x
-	dec z:temp+2 ; iteration countdown
+	; Can this be rewritten to use the hardware divider?
+	lda z:math_a
+	asl
+	sta z:math_p
+	lda #0
+	ldx #16
+@loop:
+	rol
+	cmp z:math_b
+	bcc :+
+		sbc z:math_b
+	:
+	rol z:math_p
+	dex
 	bne @loop
-@end:
-	rts ; result in A
+	sta z:math_r
+	rts
+
+; 32-bit / 32-bit division, 32 + 32 result
+; math_a / math_b = math_p
+; math_a % math_b = math_r
+; clobbers A/X
+udiv32:
+	.a16
+	.i8
+	; Can this be rewritten to use the hardware divider?
+	lda z:math_a+0
+	asl
+	sta z:math_p+0
+	lda z:math_a+2
+	rol
+	sta z:math_p+2
+	stz z:math_r+2 ; A used temporarily as low word of r
+	lda #0
+	ldx #32
+@loop:
+	rol
+	rol z:math_r+2
+	cmp z:math_b+0
+	pha
+	lda z:math_r+2
+	sbc z:math_b+2
+	bcc :+
+		sta z:math_r+2
+		pla
+		sbc z:math_b+0
+		sec
+		bra :++
+	:
+		pla
+	:
+	rol z:math_p+0
+	rol z:math_p+2
+	dex
+	bne @loop
+	sta z:math_r+0
+	rts
+
+; fixed point reciprocal, clobbers A/X/Y/math_a/math_b/math_p/math_r
+recip16f: ; A = fixed point number, result in A
+	sta z:math_b+0
+	stz z:math_b+2
+	cmp #$8000
+	bcs :+
+		stz z:temp+0
+		ldy #0
+		bra :++
+	:
+		lda #$FFFF
+		eor z:math_b+0
+		inc
+		sta z:math_b+0
+		ldy #1
+	:
+	; numerator: 1.0 << 16
+	stz z:math_a+0
+	lda #(1*256)
+	sta z:math_a+2
+	jsr udiv32 ; A<<16
+	cpy #1
+	bne :+
+		lda #0
+		sec
+		sbc z:math_p+0
+		sta z:math_p+0
+		lda #0
+		sbc z:math_p+2
+		sta z:math_p+2
+	:
+	lda z:math_p+1
+	rts
 
 sincos: ; A = angle 0-255, result in cosa/sina, clobbers A/X
 	.a16
@@ -979,15 +1018,15 @@ simple_rot_scale: ; LR shoulder = scale adjust, build ABCD from angle/scale
 	lda z:scale
 	sta z:scale2+0 ; copy here for stats
 	sta z:scale2+2
-	sta z:mul16a
+	sta z:math_a
 	lda z:cosa
-	sta z:mul16b
+	sta z:math_b
 	jsr smul16f
 	sta z:cosa
 	lda z:scale
-	sta z:mul16a
+	sta z:math_a
 	lda z:sina
-	sta z:mul16b
+	sta z:math_b
 	jsr smul16f
 	sta z:sina
 	; clockwise (map-space) rotation matrix
@@ -1003,15 +1042,15 @@ simple_rot_scale: ; LR shoulder = scale adjust, build ABCD from angle/scale
 	ldx z:aspect
 	beq :+
 		lda #(256*8/7)
-		sta z:mul16a
+		sta z:math_a
 		lda z:nmi_m7t+0
-		sta z:mul16b
+		sta z:math_b
 		jsr smul16f
 		sta z:nmi_m7t+0 ; A *= 8/7
 		lda #(256*8/7)
-		sta z:mul16a
+		sta z:math_a
 		lda z:nmi_m7t+4
-		sta z:mul16b
+		sta z:math_b
 		jsr smul16f
 		sta z:nmi_m7t+4 ; C *= 8/7
 	:
@@ -1158,6 +1197,11 @@ mode_b:
 	jsr oamp_alpha_space
 	lda z:scale
 	jsr recip16f
+	;jmp oamp_hex16
+	; HACK see all bits of divide
+	lda z:math_p+2
+	jsr oamp_hex16_space
+	lda z:math_p+0
 	jmp oamp_hex16
 
 ;
