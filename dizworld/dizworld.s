@@ -76,13 +76,14 @@ pause:        .res 1 ; pauses animation
 aspect:       .res 1 ; 8:7 aspect correction
 angle:        .res 1 ; for spinning modes
 scale:        .res 2 ; for uniform scale
+scale2:       .res 4 ; for separate axis scale
 
 cosa:         .res 2 ; sincos result
 sina:         .res 2
 mul16a:       .res 2 ; 16-bit multiply terms and 32-bit product
 mul16b:       .res 2
 prod32:       .res 4
-temp:         .res 4
+temp:         .res 8
 
 det_r:        .res 2 ; storage for 1 / AD-BC
 
@@ -763,7 +764,7 @@ umul16: ; mul16a x mul16b = prod32, clobbers A/X/Y
 	sta z:prod32+2    ; 00AA + 0BB0 + 0CC0 + DD00
 	rts
 
-; signed 16-bit multiply, 32-bit result, clobbers mul16a/mul16b/temp/A/X/Y
+; signed 16-bit multiply, 32-bit result, clobbers mul16a/mul16b/temp+0/A/X/Y
 smul16:
 	.a16
 	.i8
@@ -806,7 +807,9 @@ smul16f: ; smul16 but returning the middle 16-bit value as A (i.e. 8.8 fixed poi
 	lda z:prod32+1
 	rts
 
-recip16f: ; A = fixed point number, clobbers A/X/Y/temp/mul16a/mul16b/prod32
+; TODO
+; this doesn't quite work, recip of 2 ($0200) = 0?
+recip16f: ; A = fixed point number, clobbers A/X/Y/temp0-6/mul16a/mul16b/prod32
 	.a16
 	.i8
 	;
@@ -816,7 +819,7 @@ recip16f: ; A = fixed point number, clobbers A/X/Y/temp/mul16a/mul16b/prod32
 	; There might be a faster method using hardware divide? This works for now.
 	;
 	@ITERATIONS = 6
-	sta z:temp+0 ; temp+0 = a
+	sta z:temp+4 ; temp+4 = a
 	sta z:mul16a ; mul16a = a
 	ldx #@ITERATIONS
 	stx z:temp+2 ; temp+2 = iterations
@@ -824,12 +827,12 @@ recip16f: ; A = fixed point number, clobbers A/X/Y/temp/mul16a/mul16b/prod32
 	stx z:temp+3 ; for 16-bit decrement
 	lda #(2*256)
 	sec
-	sbc z:temp+0 ; 2-a = 1st iteration result if first guess for x=1
+	sbc z:temp+4 ; 2-a = 1st iteration result if first guess for x=1
 	sta z:mul16b
 	bra @start
 @loop: ; A = best guess (x)
 	sta z:mul16b
-	lda z:temp+0 ; a
+	lda z:temp+4 ; a
 	sta z:mul16a
 @start: ; mul16a = a, mul16b = best guess (x)
 	jsr smul16 ; a*x
@@ -838,7 +841,7 @@ recip16f: ; A = fixed point number, clobbers A/X/Y/temp/mul16a/mul16b/prod32
 	sbc z:prod32+1
 	sta z:mul16a ; 2 - a*x
 	jsr smul16f ; (2 - a*x) * x
-	dec z:temp+3 ; iteration countdown
+	dec z:temp+2 ; iteration countdown
 	bne @loop
 @end:
 	rts ; result in A
@@ -974,6 +977,8 @@ simple_rot_scale: ; LR shoulder = scale adjust, build ABCD from angle/scale
 	jsr sincos
 	; apply uniform scale
 	lda z:scale
+	sta z:scale2+0 ; copy here for stats
+	sta z:scale2+2
 	sta z:mul16a
 	lda z:cosa
 	sta z:mul16b
@@ -1052,7 +1057,15 @@ print_stats:
 	lda z:nmi_vofs
 	jsr oamp_hex16
 	jsr oamp_return
-	rts
+	; Mx,My
+	jsr oamp_space
+	lda #'M'
+	jsr oamp_alpha_space
+	lda z:scale+0
+	jsr oamp_hex16_space
+	lda z:scale+2
+	jsr oamp_hex16
+	jmp oamp_return
 
 ;
 ; Mode A test "Overhead, simple"
@@ -1138,7 +1151,14 @@ mode_b:
 	; TODO transform Tx,Ty into hofs/vofs
 	jsr simple_scroll ; HACK dont do this
 	stz z:nmi_hofs ; cancel this for now
-	jmp print_stats
+	jsr print_stats
+	; HACK test of reciprocal
+	jsr oamp_space
+	lda #'R'
+	jsr oamp_alpha_space
+	lda z:scale
+	jsr recip16f
+	jmp oamp_hex16
 
 ;
 ; Mode X test "Tilted plane"
