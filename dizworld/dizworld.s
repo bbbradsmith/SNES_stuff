@@ -1,7 +1,7 @@
 ; dizworld Mode 7 demo
 ;
 ; Demonstrating 4 practical uses of Mode 7
-;  Select - Toggle matrix display.
+;  Select - Toggle aspect ratio correction
 ;  A - Rotate background around a pivot point. (Suitable for bosses.)
 ;      D-pad to scroll.
 ;      L/R to scale.
@@ -96,7 +96,14 @@ nmi_m7y:      .res 2
 new_hdma_en:  .res 1 ; HDMA channel enable at next update
 nmi_hdma_en:  .res 1 ; HDMA channel enable currently
 
+oamp_i:       .res 2 ; OAM printing
+oamp_x:       .res 1
+oamp_y:       .res 1
+
 .segment "LORAM" ; <$2000
+
+oam:      .res 512+32
+
 .segment "HIRAM" ; $FE bank < $8000
 
 new_hdma: .res 16 * 8 ; HDMA channel settings to apply at next update
@@ -109,12 +116,6 @@ nmi_hdma: .res 16 * 8 ; HDMA channel settings current
 .assert (^__RODATA_LOAD__) = (^(__RODATA_LOAD__ + __RODATA_SIZE__)), error, "RODATA cannot cross a bank"
 
 BANK_RODATA = ^__RODATA_LOAD__
-
-;
-; Macros
-;
-
-; TODO
 
 ;
 ; START stub for bank $00 dispatch
@@ -220,6 +221,25 @@ nmi:
 	sta $2120 ; M7F
 	lda z:nmi_m7y+1
 	sta $2120
+	; 3. OAM DMA
+	stz $2102
+	stz $2103
+	lda #%00000010 ; increment, 1-regiter (x2)
+	sta $4300
+	lda #$04 ; $2104
+	sta $4301
+	lda #<oam
+	sta $4302
+	lda #>oam
+	sta $4303
+	lda #^oam
+	sta $4304
+	lda #<(512+32)
+	sta $4305
+	lda #>(512+32)
+	sta $4306
+	lda #$01
+	sta $420B ; DMA
 	; force blanking off
 	lda #$0F
 	sta $2100
@@ -374,7 +394,6 @@ reset:
 	sep #$30
 	.a8
 	.i8
-	; TODO use a16,i8 instead?
 	; load vram
 	stz $2116 ; VMADD $0000
 	stz $2117
@@ -420,36 +439,21 @@ reset:
 	sta $4306 ; 256 bytes
 	lda #$01
 	sta $420B ;DMA
-	; clear OAM
-	; TODO RAM OAM instead and get rid of this
-	stz $2102 ; OAMADD 0
-	stz $2103
-	lda #%00001010 ; no-increment, 1-register
-	sta $4300
-	lda #$04 ; $2104 OAMDATA
-	sta $4301
-	lda #<byteE0 ; E0 = all sprites offscreen
-	sta $4302
-	lda #>byteE0
-	sta $4303
-	lda #^byteE0
-	sta $4304
-	stz $4305
-	lda #>512
-	sta $4306 ; 512 bytes
-	lda #$01
-	sta $420B ; DMA
-	lda #<byteAA ; AA = all sprites size = 32, X = onscreen
-	sta $4302
-	lda #>byteAA
-	sta $4303
-	lda #^byteAA
-	sta $4304
-	lda #32
-	sta $4305
-	stz $4306 ; 32 bytes
-	lda #$01
-	sta $420B ; DMA
+	; setup OAM
+	lda #$E0
+	sta a:oam+0
+	rep #$30
+	.a16
+	.i16
+	ldx #.loword(oam+0)
+	ldy #.loword(oam+1)
+	lda #(512-2)
+	mvn #^oam,#^oam ; fill with E0
+	sep #$30
+	.a8
+	.i8
+	lda #$AA
+	sta oam+512 ; first 4 sprites are 32x32
 	; setup PPU addresses
 	lda #((>VRAM_NMT_SKY) & $FC)
 	sta $2107 ; BG1SC nametable, 1-screen
@@ -478,6 +482,7 @@ run:
 	sep #$10
 	.a16
 	.i8
+	jsr oamp_start
 	; reset mode 7 transform matrix to identity (1,0) (0,1)
 	ldx #$01
 	stx nmi_m7t+1
@@ -485,12 +490,14 @@ run:
 	jsr set_mode_a
 @loop:
 	; post a render update
+	jsr oamp_finish
 	ldx #1
 	stx z:nmi_ready
 	wai
 	:
 		ldx z:nmi_ready
 		bne :-
+	jsr oamp_start
 	; read controllers
 	lda z:gamepad
 	sta z:lastpad
@@ -579,6 +586,144 @@ run:
 	stx z:mode
 	jsr set_mode_y
 	jmp @loop
+
+;
+; OAM printing
+;
+
+OAMP_X = 24 ; starting position for OAM printing
+OAMP_Y = 168
+OAMP_I = 4*4 ; skip first 4 sprites
+
+oamp_start:
+	.a16
+	.i8
+	lda #OAMP_I
+	sta z:oamp_i
+	ldx #OAMP_X
+	stx z:oamp_x
+	ldx #OAMP_Y
+	stx z:oamp_y
+	rts
+
+oamp_finish:
+	php
+	sep #$20
+	rep #$10
+	.a8
+	.i16
+	ldx z:oamp_i
+	lda #$E0
+	:
+		sta a:oam+1, X
+		inx
+		inx
+		inx
+		inx
+		cpx #512
+		bcc :-
+	plp
+
+oamp_return: ; carriage return
+	.a16
+	.i8
+	ldx #OAMP_X
+	stx z:oamp_x
+	lda #0
+	ldx z:oamp_y
+	txa
+	clc
+	adc #8
+	tax
+	stx z:oamp_y
+	rts
+
+oamp_char_:
+	.a8
+	.i16
+	ldx z:oamp_i
+	sta a:oam+2, X
+	lda z:oamp_y
+	sta a:oam+1, X
+	lda z:oamp_x
+	sta a:oam+0, X
+	clc
+	adc #8
+	sta z:oamp_x
+	lda #$30 ; priority 3
+	sta a:oam+3, X
+	inx
+	inx
+	inx
+	inx
+	stx z:oamp_i
+	rts
+
+oamp_space: ; skips a space
+	.a16
+	.i8
+	ldx z:oamp_x
+	txa
+	clc
+	adc #8
+	tax
+	stx z:oamp_x
+	rts
+
+oamp_alpha: ; A = ascii capital letter to print
+	php
+	sep #$20
+	rep #$10
+	.a8
+	.i16
+	clc
+	adc #$CA-'A'
+	jsr oamp_char_
+	plp
+	rts
+
+oamp_alpha_space: ; alpha + space
+	jsr oamp_alpha
+	jmp oamp_space
+
+oamp_hex8: ; A = value to print in hex
+	php
+	sep #$20
+	rep #$10
+	.a8
+	.i16
+	pha
+	lsr
+	lsr
+	lsr
+	lsr
+	ora #$C0
+	jsr oamp_char_
+	pla
+	and #$0F
+	ora #$C0
+	jsr oamp_char_
+	plp
+	rts
+
+oamp_hex16: ; A = 16-bit value to print in hex
+	.a16
+	pha
+	lsr
+	lsr
+	lsr
+	lsr
+	lsr
+	lsr
+	lsr
+	lsr
+	jsr oamp_hex8
+	pla
+	jmp oamp_hex8
+
+oamp_hex16_space:
+	jsr oamp_hex16
+	jmp oamp_space
 
 ;
 ; Common
@@ -867,6 +1012,48 @@ simple_rot_scale: ; LR shoulder = scale adjust, build ABCD from angle/scale
 	:
 	rts
 
+print_stats:
+	.a16
+	.i8
+	; ABCD
+	lda #'A'
+	jsr oamp_alpha
+	lda #'B'
+	jsr oamp_alpha_space
+	lda z:nmi_m7t+0
+	jsr oamp_hex16_space
+	lda z:nmi_m7t+2
+	jsr oamp_hex16
+	jsr oamp_return
+	lda #'C'
+	jsr oamp_alpha
+	lda #'D'
+	jsr oamp_alpha_space
+	lda z:nmi_m7t+4
+	jsr oamp_hex16_space
+	lda z:nmi_m7t+6
+	jsr oamp_hex16
+	jsr oamp_return
+	; Px,Py
+	jsr oamp_space
+	lda #'P'
+	jsr oamp_alpha_space
+	lda z:nmi_m7x
+	jsr oamp_hex16_space
+	lda z:nmi_m7y
+	jsr oamp_hex16
+	jsr oamp_return
+	; Ox,Oy
+	jsr oamp_space
+	lda #'O'
+	jsr oamp_alpha_space
+	lda z:nmi_hofs
+	jsr oamp_hex16_space
+	lda z:nmi_vofs
+	jsr oamp_hex16
+	jsr oamp_return
+	rts
+
 ;
 ; Mode A test "Overhead, simple"
 ; - Map spins around a fixed point
@@ -904,9 +1091,9 @@ mode_a:
 		stx z:angle
 	:
 	jsr simple_rot_scale
-	jmp simple_scroll
+	jsr simple_scroll
 	; TODO sprite pinned to tilemap
-	; TODO A/B/C/D/Px/Py/Ox/Oy sprite display
+	jmp print_stats
 
 ;
 ; Mode B test "Overhead, first person"
@@ -951,7 +1138,7 @@ mode_b:
 	; TODO transform Tx,Ty into hofs/vofs
 	jsr simple_scroll ; HACK dont do this
 	stz z:nmi_hofs ; cancel this for now
-	rts
+	jmp print_stats
 
 ;
 ; Mode X test "Tilted plane"
