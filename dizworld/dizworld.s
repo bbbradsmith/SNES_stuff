@@ -1,5 +1,21 @@
 ; dizworld Mode 7 demo
-; TODO
+;
+; Demonstrating 4 practical uses of Mode 7
+;  Select - Toggle matrix display.
+;  A - Rotate background around a pivot point. (Suitable for bosses.)
+;      D-pad to scroll.
+;      L/R to scale.
+;      Start to pause the spin.
+;  B - Rotate around player. (Overhead level).
+;      D-pad to rotate or move.
+;      L/R to scale.
+;  X - Tilted view.
+;      L/R to adjust tilt.
+;      D-pad to move.
+;  Y - Flying view.
+;      D-pad to rotate or move.
+;      L/R to raise/lower.
+;      Start to toggle horizon glow.
 ;
 ; rainwarrior 2022
 ; http://rainwarrior.ca
@@ -65,8 +81,10 @@ cosa:         .res 2 ; sincos result
 sina:         .res 2
 mul16a:       .res 2 ; 16-bit multiply terms and 32-bit product
 mul16b:       .res 2
-mul16ab:      .res 4
+prod32:       .res 4
 temp:         .res 4
+
+det_r:        .res 2 ; storage for 1 / AD-BC
 
 nmi_bgmode:   .res 1
 nmi_hofs:     .res 2
@@ -333,7 +351,7 @@ reset:
 	stz $420A
 	stz $420B
 	stz $420C
-	;stz $420D
+	;stz $420D ; SlowROM
 	lda #1
 	sta $420D ; FastROM
 	; clear RAM
@@ -568,7 +586,7 @@ run:
 
 ; unsigned 16-bit multiply, 32-bit result
 ; Written by 93143: https://forums.nesdev.org/viewtopic.php?p=280007#p280007
-mul16: ; mul16a x mul16b = mul16ab, clobbers A/X/Y
+umul16: ; mul16a x mul16b = prod32, clobbers A/X/Y
 	; DB = 0
 	.a16
 	.i8
@@ -577,9 +595,9 @@ mul16: ; mul16a x mul16b = mul16ab, clobbers A/X/Y
 	ldy z:mul16b+0
 	sty $4203         ; a0 x b0 (A)
 	ldy z:mul16b+1
-	stz z:mul16ab+2
+	stz z:prod32+2
 	lda $4216
-	sta z:mul16ab+0   ; 00AA
+	sta z:prod32+0    ; 00AA
 	sty $4203         ; a0 x b1 (B)
 	ldx z:mul16a+1
 	ldy z:mul16b+0
@@ -587,17 +605,17 @@ mul16: ; mul16a x mul16b = mul16ab, clobbers A/X/Y
 	stx $4202
 	sty $4203         ; a1 x b0 (C)
 	clc
-	adc z:mul16ab+1   ; 00AA + 0BB0 (can't set carry because high byte was 0)
+	adc z:prod32+1    ; 00AA + 0BB0 (can't set carry because high byte was 0)
 	ldy z:mul16b+1
 	adc $4216
 	sty $4203         ; a1 x b1 (D)
-	sta z:mul16ab+1   ; 00AA + 0BB0 + 0CC0
-	lda z:mul16ab+2
+	sta z:prod32+1    ; 00AA + 0BB0 + 0CC0
+	lda z:prod32+2
 	bcc :+
 	adc #$00FF        ; if carry, increment top byte
 :
 	adc $4216
-	sta z:mul16ab+2   ; 00AA + 0BB0 + 0CC0 + DD00
+	sta z:prod32+2    ; 00AA + 0BB0 + 0CC0 + DD00
 	rts
 
 ; signed 16-bit multiply, 32-bit result, clobbers mul16a/mul16b/temp/A/X/Y
@@ -608,33 +626,31 @@ smul16:
 	; invert terms if negative, remember parity for result
 	lda z:mul16a
 	bpl :+
-		inc z:temp
-		lda #0
-		sec
-		sbc z:mul16a
+		eor #$FFFF
+		inc
 		sta z:mul16a
+		inc z:temp
 	:
 	lda z:mul16b
 	bpl :+
-		inc z:temp
-		lda #0
-		sec
-		sbc z:mul16b
+		eor #$FFFF
+		inc
 		sta z:mul16b
+		inc z:temp
 	:
 	; do unsigned multiply
-	jsr mul16
+	jsr umul16
 	; if exactly 1 of the terms was negative, invert the result
 	lda z:temp
 	cmp #1
 	bne :+
 		lda #0
 		sec
-		sbc z:mul16ab+0
-		sta z:mul16ab+0
+		sbc z:prod32+0
+		sta z:prod32+0
 		lda #0
-		sbc z:mul16ab+2
-		sta z:mul16ab+2
+		sbc z:prod32+2
+		sta z:prod32+2
 	:
 	rts
 
@@ -642,8 +658,45 @@ smul16f: ; smul16 but returning the middle 16-bit value as A (i.e. 8.8 fixed poi
 	.a16
 	.i8
 	jsr smul16
-	lda z:mul16ab+1
+	lda z:prod32+1
 	rts
+
+recip16f: ; A = fixed point number, clobbers A/X/Y/temp/mul16a/mul16b/prod32
+	.a16
+	.i8
+	;
+	; newton-rhapson reciprocal approximation
+	; iterates: x <- x * (2 - a * x)
+	;
+	; There might be a faster method using hardware divide? This works for now.
+	;
+	@ITERATIONS = 6
+	sta z:temp+0 ; temp+0 = a
+	sta z:mul16a ; mul16a = a
+	ldx #@ITERATIONS
+	stx z:temp+2 ; temp+2 = iterations
+	ldx #0
+	stx z:temp+3 ; for 16-bit decrement
+	lda #(2*256)
+	sec
+	sbc z:temp+0 ; 2-a = 1st iteration result if first guess for x=1
+	sta z:mul16b
+	bra @start
+@loop: ; A = best guess (x)
+	sta z:mul16b
+	lda z:temp+0 ; a
+	sta z:mul16a
+@start: ; mul16a = a, mul16b = best guess (x)
+	jsr smul16 ; a*x
+	lda #(2*256)
+	sec
+	sbc z:prod32+1
+	sta z:mul16a ; 2 - a*x
+	jsr smul16f ; (2 - a*x) * x
+	dec z:temp+3 ; iteration countdown
+	bne @loop
+@end:
+	rts ; result in A
 
 sincos: ; A = angle 0-255, result in cosa/sina, clobbers A/X
 	.a16
@@ -682,6 +735,7 @@ sincos_table:
 .word $0062,$0068,$006D,$0073,$0079,$007E,$0084,$0089,$008E,$0093,$0098,$009D,$00A2,$00A7,$00AC,$00B1
 .word $00B5,$00B9,$00BE,$00C2,$00C6,$00CA,$00CE,$00D1,$00D5,$00D8,$00DC,$00DF,$00E2,$00E5,$00E7,$00EA
 .word $00ED,$00EF,$00F1,$00F3,$00F5,$00F7,$00F8,$00FA,$00FB,$00FC,$00FD,$00FE,$00FF,$00FF,$0100,$0100
+; python generator:
 ;import math
 ;vt = [round(256*math.cos(i*math.pi/128)) for i in range(256)]
 ;for y in range(16):
@@ -690,6 +744,45 @@ sincos_table:
 ;        s += "$%04X" % (vt[x+(y*16)] & 0xFFFF)
 ;        if x < 15: s += ","
 ;    print(s)
+
+;
+; Mode 7 calculations
+;
+
+;
+; A,B,C,D = M7A,B,C,D "matrix"
+; Sx,Sy = screen coordinate (0-255,0-223) "screen"
+; Ox,Oy = M7HOFS,M7VOFS "offset"
+; Px,Py = M7X,M7Y "pivot"
+; Tx,Ty = texel coordinate
+; Mx,My = horizontal scale, vertical scale
+;
+; The official texel lookup:
+;
+;   [A B]   [Sx+Ox-Px]   [ Px ]   [ Tx ]
+;   [   ] x [        ] + [    ] = [    ]
+;   [C D]   [Sy+Oy-Py]   [ Py ]   [ Ty ]
+; 
+;   Tx = A (Sx + Ox - Px) + B (Sy + Oy - Py) + Px
+;   Ty = C (Sx + Ox - Px) + D (Sy + Oy - Py) + Py
+;
+; Texel to screen:
+;
+;   Sx = Px - Ox + (D(Tx-Px)-B(Ty-Py)) / (AD-BC)
+;   Sy = Py - Oy + (A(Ty-Py)-C(Tx-Px)) / (AD-BC)
+;
+; Calculating offset when you know where on-screen a texel should appear:
+;
+;   Ox = Px - Sx + (D(Tx-Px)-B(Ty-Py)) / (AD-BC)
+;   Oy = Py - Sy + (A(Ty-Py)-C(Tx-Px)) / (AD-BC)
+;
+; Because we are only using rotation + scale for ABCD, the determinant (AD-BC) is more simply:
+;
+;   Mx * My
+;
+;   AD - BC = Mx cos * My cos + Mx sin * My sin
+;           = (Mx * My)(cos^2 + sin^2)
+;
 
 simple_scroll: ; UDLR = hofs/vofs
 	.a16
