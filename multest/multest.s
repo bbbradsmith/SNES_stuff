@@ -384,11 +384,7 @@ print_hex8: ; A = hex value, clobber X
 
 print_hex16:
 	pha
-	ldx #8
-	:
-		lsr
-		dex
-		bne :-
+	xba
 	jsr print_hex8
 	pla
 	jmp print_hex8
