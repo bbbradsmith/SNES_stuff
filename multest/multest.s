@@ -554,7 +554,7 @@ print_result:
 	rts
 
 ; unsigned 16-bit multiply, 32-bit result
-; Written by 93143: https://forums.nesdev.org/viewtopic.php?p=280007#p280007
+; Written by 93143: https://forums.nesdev.org/viewtopic.php?p=280089#p280089
 mul16: ; mul16a x mul16b = mul16ab, clobbers A/X/Y
 	; DB = 0
 	.a16
@@ -563,13 +563,12 @@ mul16: ; mul16a x mul16b = mul16ab, clobbers A/X/Y
 	stx $4202
 	ldy z:mul16b+0
 	sty $4203         ; a0 x b0 (A)
-	ldy z:mul16b+1
+	ldx z:mul16b+1
 	stz z:mul16ab+2
 	lda $4216
+	stx $4203         ; a0 x b1 (B)
 	sta z:mul16ab+0   ; 00AA
-	sty $4203         ; a0 x b1 (B)
 	ldx z:mul16a+1
-	ldy z:mul16b+0
 	lda $4216
 	stx $4202
 	sty $4203         ; a1 x b0 (C)
