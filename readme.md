@@ -16,8 +16,9 @@ Just a random collection of small SNES programs. Demonstrations and experiments.
   * Demonstration of practical uses for Mode 7 graphics
 
 * **[multest](multest)** (2022-06-06)
-  * Test of hardware multiply algorithm
+  * Test of hardware multiply/divide algorithms
   * ROM: [multest_mul16.sfc](../../raw/main/multest/multest_mul16.sfc)
+  * ROM: [multest_div16.sfc](../../raw/main/multest/multest_div16.sfc)
 
 * **[extbgtest](extbgtest)** (2022-06-06)
   * Test of Mode 7 EXTBG

@@ -22,7 +22,7 @@ test_name: .asciiz "Multest mul16"
 
 ; unsigned 16-bit multiply, 32-bit result
 ; Written by 93143: https://forums.nesdev.org/viewtopic.php?p=280089#p280089
-test_run: ; mul16a x mul16b = mul16ab, clobbers A/X/Y
+test_run: ; test_in0 x test_in1 = test_out, clobbers A/X/Y
 	; DB = 0
 	.a16
 	.i8
