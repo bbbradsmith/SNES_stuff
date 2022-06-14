@@ -1,4 +1,4 @@
-; multest multiply routine test
+; multest framework for testing calculations
 ;
 ; rainwarrior 2022
 ; http://rainwarrior.ca
@@ -7,6 +7,26 @@
 .a8
 .i8
 
+; defined in test module
+.import test_name : far ; asciiz string for title
+.import test_run ; a16/i8 LOPRG code to be tested (input: test_in, output: test_out)
+.import test_ref ; a16/i8 LOPRG reference code to be tested against
+
+; accessible to test module
+.exportzp test_count
+.exportzp test_in0
+.exportzp test_in1
+.exportzp test_out
+
+;
+; Constants
+;
+
+
+TEST_JUMP_IN = 0
+PRINT_ALL_RESULTS = 0
+TEST_INCREMENT = 5081 ; a prime number just to avoid cycling in order
+
 VRAM_NMT = $0000
 VRAM_CHR = $2000
 
@@ -14,8 +34,9 @@ VRAM_CHR = $2000
 ; Header
 ;
 
+; 
 .segment "HEADER"
-.byte "MULTEST              "
+;.byte "MULTEST              " ; in HEADNAME
 .byte $31 ; map mode (HiROM, FastROM)
 .byte $00 ; cartridge type (ROM only)
 .byte $08 ; 2mbit (256k)
@@ -58,14 +79,14 @@ nmi_ready:    .res 1
 nmi_count:    .res 1
 ptr:           .res 3
 
-mul16a:       .res 2 ; 16-bit multiply terms and 32-bit product
-mul16b:       .res 2
-mul16ab:      .res 4
+test_count:   .res 4 ; test framework counter through test cases
+testc_in0:    .res 4
+testc_in1:    .res 4
 
-testa:        .res 2
-testb:        .res 2
-testc:        .res 2
-temp:         .res 4
+test_in0:     .res 4 ; inputs and results for the tests (test may modify)
+test_in1:     .res 4
+test_out:     .res 4
+copy_out:     .res 4
 
 .segment "LORAM" ; <$2000
 .segment "HIRAM" ; $FE bank < $8000
@@ -441,11 +462,18 @@ run:
 	sep #$10
 	.a16
 	.i8
-	; TEST
-	PRINTXY 5, 5, "Multest"
+	; print test_name
+	LATCHXY 5, 5
+	lda #.loword(test_name)
+	sta z:ptr+0
+	ldx #^test_name
+	stx z:ptr+2
+	jsr print_ptr
 	; to jump into more relevant tests earlier:
-	;lda #5081
-	;sta z:testa
+	.if TEST_JUMP_IN
+		lda #5081
+		sta z:testc_in0
+	.endif
 @loop:
 	jsr render_on
 	; read controllers
@@ -461,9 +489,9 @@ run:
 	eor z:lastpad
 	and z:gamepad
 	sta z:newpad
-	jsr test
+	jsr test_set
 	; pass when testc returns to 0000
-	lda z:testc
+	lda z:test_count
 	;cmp #2 ; to test passing
 	beq @pass
 	jmp @loop
@@ -478,53 +506,65 @@ run:
 ; test
 ;
 
-test:
+; run one batch of tests then return (in case we need occasional user input)
+test_set:
+	; run test
+	jsr test_set_run
+	; increment
+	lda z:testc_in0
+	clc
+	adc #TEST_INCREMENT
+	sta z:testc_in0
+	inc z:test_count
+	rts
+
+test_set_run: ; run test for testc_in0, for all values of testc_in1
+	; display current test_count / testc_in0
 	jsr render_off
 	LATCHXY 5,8
-	lda z:testc
+	lda z:test_count
 	jsr print_hex16
 	PRINTSTR " ("
-	lda z:testa
+	lda z:testc_in0
 	jsr print_hex16
 	PRINTSTR ")"
 	jsr render_on
+	; preform tests for all values of tests_in1
+	stz z:testc_in1
 @loop:
-	; mul16 to be tested
-	lda z:testa
-	sta z:mul16a
-	lda z:testb
-	sta z:mul16b
-	jsr mul16
-	lda z:mul16ab+0
-	sta z:temp+0
-	lda z:mul16ab+2
-	sta z:temp+2
+	; inputs to be tested
+	lda z:testc_in0
+	sta z:test_in0
+	lda z:testc_in1
+	sta z:test_in1
+	jsr test_run
+	lda z:test_out+0
+	sta z:copy_out+0
+	lda z:test_out+2
+	sta z:copy_out+2
 	; reference implementation
-	lda z:testa
-	sta z:mul16a
-	lda z:testb
-	sta z:mul16b
-	jsr mul16
-	; to test results
-	;jsr render_off
-	;jsr print_result
-	;jsr render_on
+	lda z:testc_in0
+	sta z:test_in0
+	lda z:testc_in1
+	sta z:test_in1
+	jsr test_ref
+	; to test results:
+	.if PRINT_ALL_RESULTS
+		jsr render_off
+		jsr print_result
+		jsr render_on
+	.endif
 	; compare
-	;inc z:temp+0 ; to test fail
-	lda z:mul16ab+0
-	cmp z:temp+0
+	;inc z:copy_out+0 ; to test fail
+	lda z:test_out+0
+	cmp z:copy_out+0
 	bne @fail
-	lda z:mul16ab+2
-	cmp z:temp+2
+	lda z:test_out+2
+	cmp z:copy_out+2
 	bne @fail
 	; next test
-	inc z:testb
+	inc z:testc_in1
 	bne @loop
-	lda z:testa
-	clc
-	adc #5081 ; a prime number just to avoid cycling in order
-	sta z:testa
-	inc z:testc
 	rts
 @fail:
 	jsr render_off
@@ -536,73 +576,21 @@ test:
 
 print_result:
 	LATCHXY 5, 12
-	lda z:testa
+	lda z:testc_in0
 	jsr print_hex16
 	PRINTSTR " x "
-	lda z:testb
+	lda z:testc_in1
 	jsr print_hex16
 	LATCHXY 5,13
-	lda z:temp+2
+	lda z:copy_out+2
 	jsr print_hex16
-	lda z:temp+0
+	lda z:copy_out+0
 	jsr print_hex16
 	PRINTSTR " != "
-	lda z:mul16ab+2
+	lda z:test_out+2
 	jsr print_hex16
-	lda z:mul16ab+0
+	lda z:test_out+0
 	jsr print_hex16
-	rts
-
-; unsigned 16-bit multiply, 32-bit result
-; Written by 93143: https://forums.nesdev.org/viewtopic.php?p=280089#p280089
-mul16: ; mul16a x mul16b = mul16ab, clobbers A/X/Y
-	; DB = 0
-	.a16
-	.i8
-	ldx z:mul16a+0
-	stx $4202
-	ldy z:mul16b+0
-	sty $4203         ; a0 x b0 (A)
-	ldx z:mul16b+1
-	stz z:mul16ab+2
-	lda $4216
-	stx $4203         ; a0 x b1 (B)
-	sta z:mul16ab+0   ; 00AA
-	ldx z:mul16a+1
-	lda $4216
-	stx $4202
-	sty $4203         ; a1 x b0 (C)
-	clc
-	adc z:mul16ab+1   ; 00AA + 0BB0 (can't set carry because high byte was 0)
-	ldy z:mul16b+1
-	adc $4216
-	sty $4203         ; a1 x b1 (D)
-	sta z:mul16ab+1   ; 00AA + 0BB0 + 0CC0
-	lda z:mul16ab+2
-	bcc :+
-	adc #$00FF        ; if carry, increment top byte
-:
-	adc $4216
-	sta z:mul16ab+2   ; 00AA + 0BB0 + 0CC0 + DD00
-	rts
-
-; reference shift+add multiply
-rmul16:
-	.a16
-	.i8
-	lda #0
-	ldx #16
-	lsr z:mul16a
-@loop:
-	bcc :+
-		clc
-		adc z:mul16b
-	:
-	ror
-	ror z:mul16ab+0
-	dex
-	bne @loop
-	sta z:mul16ab+2
 	rts
 
 ;
@@ -615,8 +603,6 @@ rmul16:
 .macro BANKCHECK label_
 	.assert (^(*-1))=(^(label_)), error, "BANKCHECK fail."
 .endmacro
-
-.align $10000
 
 chr_test: .incbin "test.chr"
 CHR_TEST_SIZE = * - chr_test
