@@ -21,7 +21,7 @@ test_name: .asciiz "Multest div16"
 .segment "LOPRG"
 
 ; unsigned 16-bit divide, 2 x 16-bit result
-; Based on routine by psychopathicteen: https://wiki.superfamicom.org/16-bit-multiplication-and-division/
+; Based on routine by psycopathicteen: https://wiki.superfamicom.org/16-bit-multiplication-and-division/
 ; test_in0 / test_in1 = test_out+2
 ; test_in0 % test_in1 = test_out+0
 test_run: ; clobbers A/X/Y

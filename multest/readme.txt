@@ -22,7 +22,7 @@ https://forums.nesdev.org/viewtopic.php?p=280007#p280007
 Test of an algorithm for unsigned 16-bit / 16-bit = 16-bit divide + remainder,
 partially using SNES hardware divide and multiply.
 
-Algorithm based on psychopathicteen's technique here:
+Algorithm based on psycopathicteen's technique here:
 https://wiki.superfamicom.org/16-bit-multiplication-and-division/
 
 == Build Info ==
