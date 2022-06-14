@@ -14,6 +14,8 @@ values and bad result. Otherwise prints "Pass!" after it's complete.
 Test of an algorithm for unsigned 16-bit x 16-bit = 32-bit multiply,
 using SNES hardware multiply.
 
+Runs in roughly 0.5 scanlines, vs. 2 scanlines for reference binary multiply.
+
 Algorithm written by 93143 here:
 https://forums.nesdev.org/viewtopic.php?p=280007#p280007
 
@@ -21,6 +23,8 @@ https://forums.nesdev.org/viewtopic.php?p=280007#p280007
 
 Test of an algorithm for unsigned 16-bit / 16-bit = 16-bit divide + remainder,
 partially using SNES hardware divide and multiply.
+
+Runs in roughly 0.2 to 1.0 scanlines, vs. 2 scanlines for reference binary divide.
 
 Algorithm based on psycopathicteen's technique here:
 https://wiki.superfamicom.org/16-bit-multiplication-and-division/
