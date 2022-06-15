@@ -1438,6 +1438,12 @@ simple_rot_scale: ; LR shoulder = scale adjust, build ABCD from angle/scale
 		sta z:math_b
 		jsr smul16f
 		sta z:nmi_m7t+4 ; C *= 8/7
+		lda #(256*8/7)
+		sta z:math_a
+		lda z:scale2+0
+		sta z:math_b
+		jsr smul16f
+		sta z:scale2+0 ; Mx *= 8/7
 	:
 	rts
 
