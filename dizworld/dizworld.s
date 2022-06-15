@@ -84,9 +84,9 @@ math_a:       .res 4 ; multiply/divide/math input terms 16 or 32-bit
 math_b:       .res 4
 math_p:       .res 8 ; product/quotient
 math_r:       .res 8 ; remainder
-temp:         .res 8
+temp:         .res 16
 
-det_r:        .res 2 ; storage for 1 / AD-BC
+det_r:        .res 4 ; storage for 1 / AD-BC (16.16f)
 texelx:       .res 2 ; input/result for coordinate transforms
 texely:       .res 2
 screenx:      .res 2
@@ -939,6 +939,84 @@ smul32f_16f: ; a = 24.8 fixed, b = 8.8 fixed, clobbers: math_a/math_b
 	lda z:math_p+2 ; result in upper bits
 	rts
 
+smul32ft: ; a = 24.8 fixed, b = 16.16 fixed, 40-bit result in math_r, returns top 16 bits, clobbers temp
+	.a16
+	.i8
+	; sign extend and copy to temp
+	lda z:math_a+0
+	sta z:temp+0
+	lda z:math_a+2
+	sta z:temp+2
+	stz z:temp+4
+	cmp #$8000
+	bcc :+
+		lda #$FFFF
+		sta z:temp+4
+	:
+	lda z:math_b+0
+	sta z:temp+8
+	lda z:math_b+2
+	sta z:temp+10
+	stz z:temp+12
+	cmp #$8000
+	bcc :+
+		lda #$FFFF
+		sta z:temp+12
+	:
+	; 40-bit multiply (temporary result in r)
+	jsr umul16 ; a0 x b0 (A)
+	lda z:math_p+0
+	sta z:math_r+0
+	lda z:math_p+2
+	sta z:math_r+2
+	stz z:math_r+4 ; 0AAAA
+	lda z:temp+10
+	sta z:math_b
+	jsr umul16 ; a0 x b1 (B)
+	lda z:math_p+0
+	clc
+	adc z:math_r+2
+	sta z:math_r+2
+	lda z:math_p+2
+	adc z:math_r+4
+	sta z:math_r+4 ; 0AAAA + BBB00
+	lda z:temp+2
+	sta z:math_a
+	lda z:temp+8
+	sta z:math_b
+	jsr umul16 ; a1 x b0 (C)
+	lda z:math_p+0
+	clc
+	adc z:math_r+2
+	sta z:math_r+2
+	lda z:math_p+2
+	adc z:math_r+4 ; 0AAAA + BBB00 + CCC00
+	; 3 8x8 multiplies for the top byte
+	; A is now temporary r+4
+	ldx z:temp+0
+	stx $4202
+	ldx z:temp+12
+	stx $4203 ; a0 x b2 (D)
+	ldx z:temp+2
+	clc
+	adc $4216      ; 0AAAA + BBB00 + CCC00 + D0000
+	stx $4202
+	ldx z:temp+10
+	stx $4203 ; a1 x b1 (E)
+	ldx z:temp+4
+	clc
+	adc $4216     ; 0AAAA + BBB00 + CCC00 + D0000 + E0000
+	stx $4202
+	ldx z:temp+8
+	stx $4203 ; a2 x b0 (F)
+	nop
+	nop
+	clc
+	adc $4216     ; 0AAAA + BBB00 + CCC00 + D0000 + E0000 + F0000
+	sta z:math_r+4
+	lda z:math_r+3 ; return top 16 bits
+	rts
+
 ; 16-bit / 16-bit division, 16 + 16 result
 ; math_a / math_b = math_p
 ; math_a % math_b = math_r
@@ -1131,76 +1209,82 @@ calc_det_r: ; recalculate det_r used in various position calculations
 	sta z:math_b
 	jsr smul16f
 	jsr recip16f
-	sta z:det_r
+	lda z:math_p+0
+	sta z:det_r+0
+	lda z:math_p+2
+	sta z:det_r+2
 	rts
 
 texel_to_screen: ; input: texelx,texely output screenx,screeny (requires det_r)
 	lda z:texelx
 	sec
 	sbc z:nmi_m7x
-	sta z:temp+0 ; Tx-Px
+	pha ; Tx-Px
 	sta z:math_a
 	lda z:nmi_m7t+4 ; C
 	sta z:math_b
 	jsr smul16
 	lda z:math_p+0
-	sta z:temp+4 ; C(Tx-Px) 24.8f
+	sta z:temp+0 ; C(Tx-Px) 24.8f
 	lda z:math_p+2
-	sta z:temp+6
+	sta z:temp+2
 	lda z:texely
 	sec
 	sbc z:nmi_m7y
-	sta z:temp+2 ; Ty-Py
+	pha ; Ty-Py
 	sta z:math_a
 	lda z:nmi_m7t+0 ; A
 	sta z:math_b
 	jsr smul16
 	lda z:math_p+0
 	sec
-	sbc z:temp+4 ; A(Ty-Py)-C(Tx-Px)
+	sbc z:temp+0 ; A(Ty-Py)-C(Tx-Px)
 	sta z:math_a+0
 	lda z:math_p+2
-	sbc z:temp+6
+	sbc z:temp+2
 	sta z:math_a+2
-	lda z:det_r
-	sta z:math_b
-	jsr smul32f_16f ; (A(Ty-Py)-C(Tx-Px)) / (AD-BC)
+	lda z:det_r+0
+	sta z:math_b+0
+	lda z:det_r+2
+	sta z:math_b+2
+	jsr smul32ft ; (A(Ty-Py)-C(Tx-Px)) / (AD-BC)
 	clc
 	adc z:nmi_m7y ; Py + (A(Ty-Py)-C(Tx-Px)) / (AD-BC)
 	sec
 	sbc z:nmi_vofs ; Py - Oy + (A(Ty-Py)-C(Tx-Px)) / (AD-BC)
 	sta z:screeny
-	lda z:temp+2 ; Ty-Py
+	pla ; Ty-Py
 	sta z:math_a
 	lda z:nmi_m7t+2 ; B
 	sta z:math_b
 	jsr smul16
 	lda z:math_p+0
-	sta z:temp+4 ; B(Ty-Py) 24.8f
+	sta z:temp+0 ; B(Ty-Py) 24.8f
 	lda z:math_p+2
-	sta z:temp+6
-	lda z:temp+0 ; Tx-Px
+	sta z:temp+2
+	pla ; Tx-Px
 	sta z:math_a
 	lda z:nmi_m7t+6 ;D
 	sta z:math_b
 	jsr smul16
 	lda z:math_p+0
 	sec
-	sbc z:temp+4 ; D(Tx-Px)-B(Ty-Py)
+	sbc z:temp+0 ; D(Tx-Px)-B(Ty-Py)
 	sta z:math_a+0
 	lda z:math_p+2
-	sbc z:temp+6
+	sbc z:temp+2
 	sta z:math_a+2
-	lda z:det_r
-	sta z:math_b
-	jsr smul32f_16f ; (D(Tx-Px)-B(Ty-Py)) / (AD-BC)
+	lda z:det_r+0
+	sta z:math_b+0
+	lda z:det_r+2
+	sta z:math_b+2
+	jsr smul32ft ; (D(Tx-Px)-B(Ty-Py)) / (AD-BC)
 	clc
 	adc z:nmi_m7x ; Px + (D(Tx-Px)-B(Ty-Py)) / (AD-BC)
 	sec
 	sbc z:nmi_hofs ; Px - Ox + (D(Tx-Px)-B(Ty-Py)) / (AD-BC)
 	sta z:screenx
 	rts
-	; TODO the weak point of precision is det_r which is only 8.8. If we used 16.16 we could do smul 24.8 * 16.16 at 40-bits wide and keep bits 24-39?
 
 simple_scroll: ; UDLR = hofs/vofs
 	.a16
@@ -1349,10 +1433,10 @@ MODE_A_PX = 152
 MODE_A_PY = 120
 
 ; texel coordinate of screen-sprite
-MODE_A_TX = 280 ; entrance to forest
-MODE_A_TY = 115
-;MODE_A_TX = 807 ; tip of 7 in "MODE 7" (accuracy declines with distance from Px)
-;MODE_A_TY = 645
+;MODE_A_TX = 280 ; entrance to forest
+;MODE_A_TY = 115
+MODE_A_TX = 807 ; tip of 7 in "MODE 7" (accuracy declines with distance from Px)
+MODE_A_TY = 645
 
 set_mode_a:
 	.a16
