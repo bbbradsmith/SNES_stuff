@@ -82,11 +82,15 @@ cosa:         .res 2 ; sincos result
 sina:         .res 2
 math_a:       .res 4 ; multiply/divide/math input terms 16 or 32-bit
 math_b:       .res 4
-math_p:       .res 4 ; product/quotient
-math_r:       .res 4 ; remainder
+math_p:       .res 8 ; product/quotient
+math_r:       .res 8 ; remainder
 temp:         .res 8
 
 det_r:        .res 2 ; storage for 1 / AD-BC
+texelx:       .res 2 ; input/result for coordinate transforms
+texely:       .res 2
+screenx:      .res 2
+screeny:      .res 2
 
 nmi_bgmode:   .res 1
 nmi_hofs:     .res 2
@@ -590,6 +594,42 @@ run:
 	jmp @loop
 
 ;
+; OAM sprite
+;
+
+oam_sprite_clear: ; move 4 sprites offscreen
+	.i8
+	ldx #$E0
+	stx a:oam+1+( 0)
+	stx a:oam+1+( 4)
+	stx a:oam+1+( 8)
+	stx a:oam+1+(12)
+	rts
+
+oam_sprite: ; A = tile, X = OAM start index (x4), screenx,screeny location
+	php
+	sep #$20
+	.a8
+	sta a:oam+2, X
+	lda z:screenx+1
+	bne @skip
+	lda z:screeny+1
+	bne @skip
+	lda screenx+0
+	sta a:oam+0, X
+	lda screeny+0
+	sta a:oam+1, X
+	lda #$30 ; high priority, palette 0, no flip
+	sta a:oam+3, X
+	plp
+	rts
+@skip:
+	lda #$E0
+	sta oam+1
+	plp
+	rts
+
+;
 ; OAM printing
 ;
 
@@ -725,7 +765,7 @@ oamp_hex16_space:
 ;
 
 ; unsigned 16-bit multiply, 32-bit result
-; Written by 93143: https://forums.nesdev.org/viewtopic.php?p=280007#p280007
+; Written by 93143: https://forums.nesdev.org/viewtopic.php?p=280089#p280089
 umul16: ; math_a x math_b = math_p, clobbers A/X/Y
 	; DB = 0
 	.a16
@@ -734,13 +774,12 @@ umul16: ; math_a x math_b = math_p, clobbers A/X/Y
 	stx $4202
 	ldy z:math_b+0
 	sty $4203         ; a0 x b0 (A)
-	ldy z:math_b+1
+	ldx z:math_b+1
 	stz z:math_p+2
 	lda $4216
+	stx $4203         ; a0 x b1 (B)
 	sta z:math_p+0    ; 00AA
-	sty $4203         ; a0 x b1 (B)
 	ldx z:math_a+1
-	ldy z:math_b+0
 	lda $4216
 	stx $4202
 	sty $4203         ; a1 x b0 (C)
@@ -756,6 +795,32 @@ umul16: ; math_a x math_b = math_p, clobbers A/X/Y
 :
 	adc $4216
 	sta z:math_p+2    ; 00AA + 0BB0 + 0CC0 + DD00
+	rts
+
+; 16-bit multiply, truncated 16-bit result (sign-agnostic)
+mul16t:
+	.a16
+	.i8
+	ldx z:math_a+0
+	stx $4202
+	ldy z:math_b+0
+	sty $4203         ; a0 x b0 (A)
+	ldx z:math_b+1
+	nop
+	lda $4216
+	stx $4203         ; a0 x b1 (B)
+	sta z:math_p+0    ; AA
+	ldx z:math_a+1
+	lda $4216
+	stx $4202
+	sty $4203         ; a1 x b0 (C)
+	clc
+	adc z:math_p+1    ; AA + B0
+	clc
+	adc $4216         ; AA + B0 + C0
+	tax
+	stx z:math_p+1
+	lda z:math_p+0
 	rts
 
 ; signed 16-bit multiply, 32-bit result, clobbers A/X/Y
@@ -786,14 +851,57 @@ smul16f: ; smul16 but returning the middle 16-bit value as A (i.e. 8.8 fixed poi
 	lda z:math_p+1
 	rts
 
+smul32f_16f: ; a = 24.8 fixed, b = 8.8 fixed, clobbers: math_a/math_b
+	.a16
+	.i8
+	lda z:math_a+0
+	sta z:math_p+4
+	lda z:math_a+2
+	sta z:math_p+6 ; p+4 = a
+	lda z:math_b+0
+	sta z:math_r+4 ; r+4 = b
+	cmp #$8000
+	bcs :+
+		lda #0
+		bra :++
+	:
+		lda #$FFFF
+	:
+	sta z:math_r+6 ; sign extended
+	; 32-bit multiply from 3 x 16-bit multiply
+	jsr umul16     ; a0 x b0 (A)
+	lda z:math_p+0
+	sta z:math_r+0
+	lda z:math_p+2
+	sta z:math_r+2 ; r+0 = 00AA
+	lda z:math_r+6
+	sta z:math_b+0
+	jsr mul16t     ; a0 x b1 (B)
+	clc
+	adc z:math_r+2
+	sta z:math_r+2 ; r+0 = AAAA + BB00
+	lda z:math_p+6
+	sta z:math_a+0
+	lda z:math_r+4
+	sta z:math_b+0
+	jsr mul16t     ; a1 x b0 (C)
+	clc
+	adc z:math_r+2 ; r+0 = AAAA + BB00 + CC00
+	sta z:math_p+2
+	lda z:math_r+0
+	sta z:math_p+0
+	lda z:math_p+2 ; result in upper bits
+	rts
+
 ; 16-bit / 16-bit division, 16 + 16 result
 ; math_a / math_b = math_p
 ; math_a % math_b = math_r
 ; clobbers A/X
+; This could potentially be hardware-accelerated for ~2x speedup:
+;   See: https://github.com/bbbradsmith/SNES_stuff/blob/main/multest/test_div16.s
 udiv16:
 	.a16
 	.i8
-	; Can this be rewritten to use the hardware divider?
 	lda z:math_a
 	asl
 	sta z:math_p
@@ -815,10 +923,10 @@ udiv16:
 ; math_a / math_b = math_p
 ; math_a % math_b = math_r
 ; clobbers A/X
+; Is there a way to do this faster with the hardware divider?
 udiv32:
 	.a16
 	.i8
-	; Can this be rewritten to use the hardware divider?
 	lda z:math_a+0
 	asl
 	sta z:math_p+0
@@ -942,7 +1050,7 @@ sincos_table:
 ; Ox,Oy = M7HOFS,M7VOFS "offset"
 ; Px,Py = M7X,M7Y "pivot"
 ; Tx,Ty = texel coordinate
-; Mx,My = horizontal scale, vertical scale
+; Mx,My = horizontal texel scale, vertical texel scale
 ;
 ; The official texel lookup:
 ;
@@ -965,11 +1073,87 @@ sincos_table:
 ;
 ; Because we are only using rotation + scale for ABCD, the determinant (AD-BC) is more simply:
 ;
-;   Mx * My
-;
 ;   AD - BC = Mx cos * My cos + Mx sin * My sin
 ;           = (Mx * My)(cos^2 + sin^2)
+;           = Mx * My
 ;
+
+calc_det_r: ; recalculate det_r used in various position calculations
+	lda z:scale2+0
+	sta z:math_a
+	lda z:scale2+2
+	sta z:math_b
+	jsr smul16f
+	jsr recip16f
+	sta z:det_r
+	rts
+
+texel_to_screen: ; input: texelx,texely output screenx,screeny (requires det_r)
+	lda z:texelx
+	sec
+	sbc z:nmi_m7x
+	sta z:temp+0 ; Tx-Px
+	sta z:math_a
+	lda z:nmi_m7t+4 ; C
+	sta z:math_b
+	jsr smul16
+	lda z:math_p+0
+	sta z:temp+4 ; C(Tx-Px) 32-bit
+	lda z:math_p+2
+	sta z:temp+6
+	lda z:texely
+	sec
+	sbc z:nmi_m7y
+	sta z:temp+2 ; Ty-Py
+	sta z:math_a
+	lda z:nmi_m7t+0 ; A
+	sta z:math_b
+	jsr smul16
+	lda z:math_p+0
+	sec
+	sbc z:temp+4 ; A(Ty-Py)-C(Tx-Px)
+	sta z:math_a+0
+	lda z:math_p+2
+	sbc z:temp+6
+	sta z:math_a+2
+	lda z:det_r
+	sta z:math_b
+	jsr smul32f_16f ; (A(Ty-Py)-C(Tx-Px)) / (AD-BC)
+	clc
+	adc z:nmi_m7y ; Py + (A(Ty-Py)-C(Tx-Px)) / (AD-BC)
+	sec
+	sbc z:nmi_vofs ; Py - Oy + (A(Ty-Py)-C(Tx-Px)) / (AD-BC)
+	sta z:screeny
+	lda z:temp+2 ; Ty-Py
+	sta z:math_a
+	lda z:nmi_m7t+2 ; B
+	sta z:math_b
+	jsr smul16
+	lda z:math_p+0
+	sta z:temp+4 ; B(Ty-Py) 32-bit
+	lda z:math_p+2
+	sta z:temp+6
+	lda z:temp+0 ; Tx-Px
+	sta z:math_a
+	lda z:nmi_m7t+6 ;D
+	sta z:math_b
+	jsr smul16
+	lda z:math_p+0
+	sec
+	sbc z:temp+4 ; D(Tx-Px)-B(Ty-Py)
+	sta z:math_a+0
+	lda z:math_p+2
+	sbc z:temp+6
+	sta z:math_a+2
+	lda z:det_r
+	sta z:math_b
+	jsr smul32f_16f ; (D(Tx-Px)-B(Ty-Py)) / (AD-BC)
+	clc
+	adc z:nmi_m7x ; Px + (D(Tx-Px)-B(Ty-Py)) / (AD-BC)
+	sec
+	sbc z:nmi_hofs ; Px - Ox + (D(Tx-Px)-B(Ty-Py)) / (AD-BC)
+	sta z:screenx
+	rts
 
 simple_scroll: ; UDLR = hofs/vofs
 	.a16
@@ -1117,6 +1301,9 @@ print_stats:
 MODE_A_PX = 152
 MODE_A_PY = 120
 
+MODE_A_TX = 280
+MODE_A_TY = 115
+
 set_mode_a:
 	.a16
 	.i8
@@ -1133,6 +1320,7 @@ set_mode_a:
 	sta z:nmi_m7y
 	stz z:nmi_hofs
 	stz z:nmi_vofs
+	jsr oam_sprite_clear
 mode_a:
 	; spin
 	lda #0
@@ -1144,7 +1332,17 @@ mode_a:
 	:
 	jsr simple_rot_scale
 	jsr simple_scroll
-	; TODO sprite pinned to tilemap
+	; sprite pinned to tilemap
+	jsr calc_det_r
+	lda #MODE_A_TX
+	sta z:texelx
+	lda #MODE_A_TY
+	sta z:texely
+	jsr texel_to_screen
+	ldx #0
+	lda #$8C ; arrow
+	;jsr oam_sprite ; TODO calculation not yet correct
+	; stats
 	jmp print_stats
 
 ;
@@ -1170,6 +1368,7 @@ set_mode_b:
 	lda #MODE_A_PY
 	stz z:nmi_hofs
 	stz z:nmi_vofs
+	jsr oam_sprite_clear
 mode_b:
 	; rotate with left/right
 	ldx z:angle
@@ -1219,6 +1418,7 @@ set_mode_x:
 	stx z:nmi_bgmode
 	ldx #0
 	stx new_hdma_en
+	jsr oam_sprite_clear
 mode_x:
 	jmp simple_scroll
 
@@ -1235,6 +1435,7 @@ set_mode_y:
 	stx z:nmi_bgmode
 	ldx #0
 	stx new_hdma_en
+	jsr oam_sprite_clear
 mode_y:
 	jsr simple_scroll ; TODO
 	rts
