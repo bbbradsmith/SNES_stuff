@@ -607,20 +607,61 @@ oam_sprite_clear: ; move 4 sprites offscreen
 	rts
 
 oam_sprite: ; A = tile, X = OAM start index (x4), screenx,screeny location
+	.a16
+	tay
+	lda z:screenx
+	sec
+	sbc #16
+	sta z:temp+0
+	lda z:screeny
+	sec
+	sbc #32
+	sta z:temp+2
 	php
 	sep #$20
 	.a8
+	tya
 	sta a:oam+2, X
 	lda z:screenx+1
 	bne @skip
 	lda z:screeny+1
 	bne @skip
-	lda screenx+0
+	lda z:screeny+0
+	cmp #$E0
+	bcs @skip
+	lda z:temp+0
 	sta a:oam+0, X
-	lda screeny+0
+	lda z:temp+2
 	sta a:oam+1, X
 	lda #$30 ; high priority, palette 0, no flip
 	sta a:oam+3, X
+	; transfer X high bit to high table
+	txa
+	lsr
+	lsr
+	pha
+	and #3
+	tax ; X = 0-3 shifts needed
+	pla
+	lsr
+	lsr
+	tay ; Y = high oam entry
+	lda a:oam+512, Y
+	and f:@hoam_mask, X
+	sta a:oam+512, Y
+	lda z:temp+1
+	and #1 ; high bit of adjusted x
+	ora #2 ; 32x32 sprite size
+	cpx #0
+	beq :++
+	:
+		asl
+		asl
+		dex
+		bne :-
+	:
+	ora a:oam+512, Y
+	sta a:oam+512, Y
 	plp
 	rts
 @skip:
@@ -628,6 +669,11 @@ oam_sprite: ; A = tile, X = OAM start index (x4), screenx,screeny location
 	sta oam+1
 	plp
 	rts
+@hoam_mask:
+.byte %11111100
+.byte %11110011
+.byte %11001111
+.byte %00111111
 
 ;
 ; OAM printing
@@ -1098,7 +1144,7 @@ texel_to_screen: ; input: texelx,texely output screenx,screeny (requires det_r)
 	sta z:math_b
 	jsr smul16
 	lda z:math_p+0
-	sta z:temp+4 ; C(Tx-Px) 32-bit
+	sta z:temp+4 ; C(Tx-Px) 24.8f
 	lda z:math_p+2
 	sta z:temp+6
 	lda z:texely
@@ -1130,7 +1176,7 @@ texel_to_screen: ; input: texelx,texely output screenx,screeny (requires det_r)
 	sta z:math_b
 	jsr smul16
 	lda z:math_p+0
-	sta z:temp+4 ; B(Ty-Py) 32-bit
+	sta z:temp+4 ; B(Ty-Py) 24.8f
 	lda z:math_p+2
 	sta z:temp+6
 	lda z:temp+0 ; Tx-Px
@@ -1154,6 +1200,7 @@ texel_to_screen: ; input: texelx,texely output screenx,screeny (requires det_r)
 	sbc z:nmi_hofs ; Px - Ox + (D(Tx-Px)-B(Ty-Py)) / (AD-BC)
 	sta z:screenx
 	rts
+	; TODO the weak point of precision is det_r which is only 8.8. If we used 16.16 we could do smul 24.8 * 16.16 at 40-bits wide and keep bits 24-39?
 
 simple_scroll: ; UDLR = hofs/vofs
 	.a16
@@ -1301,8 +1348,11 @@ print_stats:
 MODE_A_PX = 152
 MODE_A_PY = 120
 
-MODE_A_TX = 280
+; texel coordinate of screen-sprite
+MODE_A_TX = 280 ; entrance to forest
 MODE_A_TY = 115
+;MODE_A_TX = 807 ; tip of 7 in "MODE 7" (accuracy declines with distance from Px)
+;MODE_A_TY = 645
 
 set_mode_a:
 	.a16
@@ -1341,7 +1391,7 @@ mode_a:
 	jsr texel_to_screen
 	ldx #0
 	lda #$8C ; arrow
-	;jsr oam_sprite ; TODO calculation not yet correct
+	jsr oam_sprite
 	; stats
 	jmp print_stats
 
