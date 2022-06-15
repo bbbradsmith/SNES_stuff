@@ -77,8 +77,9 @@ aspect:       .res 1 ; 8:7 aspect correction
 angle:        .res 1 ; for spinning modes
 scale:        .res 2 ; for uniform scale
 scale2:       .res 4 ; for separate axis scale
-subx:         .res 2 ; subpixel precision for position
-suby:         .res 2
+posx:         .res 6 ; position for some modes with subpixel precision
+posy:         .res 6
+player_tile:  .res 1 ; player sprite tile
 
 cosa:         .res 2 ; sincos result
 sina:         .res 2
@@ -668,7 +669,7 @@ oam_sprite: ; A = tile, X = OAM start index (x4), screenx,screeny location
 	rts
 @skip:
 	lda #$E0
-	sta oam+1
+	sta oam+1, X
 	plp
 	rts
 @hoam_mask:
@@ -1119,6 +1120,20 @@ recip16f: ; A = fixed point number, result in A
 	lda z:math_p+1
 	rts
 
+sign: ; A = value, returns either 0 or $FFFF, preserves flags
+	.a16
+	php
+	cmp #$8000
+	bcs :+
+		lda #0
+		plp
+		rts
+	:
+		lda #$FFFF
+		plp
+		rts
+	;
+
 sincos: ; A = angle 0-255, result in cosa/sina, clobbers A/X
 	.a16
 	.i8
@@ -1448,16 +1463,19 @@ print_stats:
 ; - Player moves over the rotated map
 ; - L/R apply scale
 ;
+; The basic concept here is just to pin Px,Py in the middle of something you want to rotate/scale,
+; and then scroll the screen to move it with hofs/vofs just a normal scroll offset relative to Px,Py.
+;
 
 ; pivot point for centre of the spin
 MODE_A_PX = 152
 MODE_A_PY = 120
 
 ; texel coordinate of screen-sprite
-;MODE_A_TX = 280 ; entrance to forest
-;MODE_A_TY = 115
-MODE_A_TX = 807 ; tip of 7 in "MODE 7" (accuracy declines with distance from Px)
-MODE_A_TY = 645
+MODE_A_TX = 280 ; entrance to forest
+MODE_A_TY = 115
+;MODE_A_TX = 807 ; tip of 7 in "MODE 7" (accuracy declines with distance from Px)
+;MODE_A_TY = 645
 
 set_mode_a:
 	.a16
@@ -1507,6 +1525,9 @@ mode_a:
 ; - L/R apply scale
 ;
 
+MODE_B_SX = 128
+MODE_B_SY = 112
+
 set_mode_b:
 	.a16
 	.i8
@@ -1517,46 +1538,134 @@ set_mode_b:
 	stx z:angle
 	lda #$0100
 	sta z:scale
-	; TODO use m7x/m7y as Tx/Ty player centre
+	; start at the centre of the spiral
+	stz z:posx+0
+	stz z:posy+0
 	lda #MODE_A_PX
-	sta z:nmi_m7x
+	sta z:posx+2
 	lda #MODE_A_PY
-	stz z:nmi_hofs
-	stz z:nmi_vofs
+	sta z:posy+2
+	stz z:posx+4
+	stz z:posy+4
 	jsr oam_sprite_clear
+	ldx #$08
+	stx z:player_tile
 mode_b:
 	; rotate with left/right
 	ldx z:angle
 	lda z:gamepad
 	and #$0200 ; left
 	beq :+
-		dex
+		ldy #$00
+		sty z:player_tile
+		inx
 	:
 	lda z:gamepad
 	and #$0100 ; right
 	beq :+
-		inx
+		ldy #$04
+		sty z:player_tile
+		dex
 	:
 	stx z:angle
 	; scale with L/R, generate rotation matrix
 	jsr simple_rot_scale
-	; TODO up/down moves player Tx/Ty according to matrix (just add m7b,m7d to tx,ty)
-	; TODO transform Tx,Ty into hofs/vofs
-	jsr simple_scroll ; HACK dont do this
-	stz z:nmi_hofs ; cancel this for now
-	jsr print_stats
-	; HACK test of reciprocal
-	jsr oamp_space
-	lda #'R'
-	jsr oamp_alpha_space
-	lda z:scale
-	jsr recip16f
-	;jmp oamp_hex16
-	; HACK see all bits of divide
-	lda z:math_p+2
-	jsr oamp_hex16_space
-	lda z:math_p+0
-	jmp oamp_hex16
+	; up/down moves player
+	lda z:gamepad
+	and #$0400 ; down
+	beq :+
+		ldy #$0C
+		sty z:player_tile
+		; X += B
+		lda z:nmi_m7t + 2 ; B
+		pha
+		clc
+		adc z:posx+1
+		sta z:posx+1
+		pla
+		jsr sign
+		adc z:posx+3
+		sta z:posx+3
+		; Y += D
+		lda z:nmi_m7t + 6 ; D
+		pha
+		clc
+		adc z:posy+1
+		sta z:posy+1
+		pla
+		jsr sign
+		adc z:posy+3
+		sta z:posy+3
+	:
+	lda z:gamepad
+	and #$0800 ; up
+	beq :+
+		ldy #$08
+		sty z:player_tile
+		; X -= B
+		lda #0
+		sec
+		sbc z:nmi_m7t + 2 ; B
+		pha
+		clc
+		adc z:posx+1
+		sta z:posx+1
+		pla
+		jsr sign
+		adc z:posx+3
+		sta z:posx+3
+		; Y -= D
+		lda #0
+		sec
+		sbc z:nmi_m7t + 6 ; D
+		pha
+		clc
+		adc z:posy+1
+		sta z:posy+1
+		pla
+		jsr sign
+		adc z:posy+3
+		sta z:posy+3
+	:
+	; posx/posy is Px/Py
+	lda z:posx+2
+	sta z:nmi_m7x
+	lda z:posy+2
+	sta z:nmi_m7y
+	; calculate hofs/vofs to put Px/Py at desired centre (equivalent to texel_to_screen with screen position in place of vofs/hofs)
+	jsr calc_det_r
+	lda #MODE_B_SX
+	sta z:nmi_hofs
+	lda #MODE_B_SY
+	sta z:nmi_vofs
+	lda z:nmi_m7x
+	sta z:texelx
+	lda z:nmi_m7y
+	sta z:texely
+	jsr texel_to_screen
+	lda z:screenx
+	sta z:nmi_hofs
+	lda z:screeny
+	sta z:nmi_vofs
+	; player sprite
+	lda #MODE_B_SX
+	sta z:screenx
+	lda #MODE_B_SY
+	sta z:screeny
+	lda player_tile
+	ldx #0
+	jsr oam_sprite
+	; sprite pinned to tilemap
+	lda #MODE_A_TX
+	sta z:texelx
+	lda #MODE_A_TY
+	sta z:texely
+	jsr texel_to_screen
+	ldx #4
+	lda #$8C ; arrow
+	jsr oam_sprite
+	; stats
+	jmp print_stats
 
 ;
 ; Mode X test "Tilted plane"
