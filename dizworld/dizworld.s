@@ -77,6 +77,8 @@ aspect:       .res 1 ; 8:7 aspect correction
 angle:        .res 1 ; for spinning modes
 scale:        .res 2 ; for uniform scale
 scale2:       .res 4 ; for separate axis scale
+subx:         .res 2 ; subpixel precision for position
+suby:         .res 2
 
 cosa:         .res 2 ; sincos result
 sina:         .res 2
@@ -1190,7 +1192,8 @@ sincos_table:
 ;   Sx = Px - Ox + (D(Tx-Px)-B(Ty-Py)) / (AD-BC)
 ;   Sy = Py - Oy + (A(Ty-Py)-C(Tx-Px)) / (AD-BC)
 ;
-; Calculating offset when you know where on-screen a texel should appear:
+; Calculating offset when you know where on-screen a texel should appear,
+; which is the same as texel-to-screen but with Ox,Oy and Sx,Sy swapped:
 ;
 ;   Ox = Px - Sx + (D(Tx-Px)-B(Ty-Py)) / (AD-BC)
 ;   Oy = Py - Sy + (A(Ty-Py)-C(Tx-Px)) / (AD-BC)
@@ -1202,7 +1205,13 @@ sincos_table:
 ;           = Mx * My
 ;
 
-calc_det_r: ; recalculate det_r used in various position calculations
+; 1 for higher precision determinant reciprocal (more accurate under scaling)
+;   adds about 10 more hardware multiplies to texel_to_screen (11 vs 9 scanlines?)
+DETR40 = 1
+
+; recalculate det_r = 1 / (AD-BC) = Mx * My
+; used in texel_to_screen and other transformations
+calc_det_r:
 	lda z:scale2+0
 	sta z:math_a
 	lda z:scale2+2
@@ -1219,7 +1228,7 @@ texel_to_screen: ; input: texelx,texely output screenx,screeny (requires det_r)
 	lda z:texelx
 	sec
 	sbc z:nmi_m7x
-	pha ; Tx-Px
+	pha ; Tx-Px 16u
 	sta z:math_a
 	lda z:nmi_m7t+4 ; C
 	sta z:math_b
@@ -1231,29 +1240,35 @@ texel_to_screen: ; input: texelx,texely output screenx,screeny (requires det_r)
 	lda z:texely
 	sec
 	sbc z:nmi_m7y
-	pha ; Ty-Py
+	pha ; Ty-Py 16u
 	sta z:math_a
 	lda z:nmi_m7t+0 ; A
 	sta z:math_b
 	jsr smul16
 	lda z:math_p+0
 	sec
-	sbc z:temp+0 ; A(Ty-Py)-C(Tx-Px)
+	sbc z:temp+0 ; A(Ty-Py)-C(Tx-Px) 24.8f
 	sta z:math_a+0
 	lda z:math_p+2
 	sbc z:temp+2
 	sta z:math_a+2
-	lda z:det_r+0
-	sta z:math_b+0
-	lda z:det_r+2
-	sta z:math_b+2
-	jsr smul32ft ; (A(Ty-Py)-C(Tx-Px)) / (AD-BC)
+	.if DETR40
+		lda z:det_r+0 ; 16.16f
+		sta z:math_b+0
+		lda z:det_r+2
+		sta z:math_b+2
+		jsr smul32ft ; (A(Ty-Py)-C(Tx-Px)) / (AD-BC) 16u
+	.else
+		lda z:det_r+1 ; 8.8f
+		sta z:math_b
+		jsr smul32f_16f ; 16u
+	.endif
 	clc
 	adc z:nmi_m7y ; Py + (A(Ty-Py)-C(Tx-Px)) / (AD-BC)
 	sec
 	sbc z:nmi_vofs ; Py - Oy + (A(Ty-Py)-C(Tx-Px)) / (AD-BC)
 	sta z:screeny
-	pla ; Ty-Py
+	pla ; Ty-Py 16u
 	sta z:math_a
 	lda z:nmi_m7t+2 ; B
 	sta z:math_b
@@ -1262,23 +1277,29 @@ texel_to_screen: ; input: texelx,texely output screenx,screeny (requires det_r)
 	sta z:temp+0 ; B(Ty-Py) 24.8f
 	lda z:math_p+2
 	sta z:temp+2
-	pla ; Tx-Px
+	pla ; Tx-Px 16u
 	sta z:math_a
 	lda z:nmi_m7t+6 ;D
 	sta z:math_b
 	jsr smul16
 	lda z:math_p+0
 	sec
-	sbc z:temp+0 ; D(Tx-Px)-B(Ty-Py)
+	sbc z:temp+0 ; D(Tx-Px)-B(Ty-Py) 24.8f
 	sta z:math_a+0
 	lda z:math_p+2
 	sbc z:temp+2
 	sta z:math_a+2
-	lda z:det_r+0
-	sta z:math_b+0
-	lda z:det_r+2
-	sta z:math_b+2
-	jsr smul32ft ; (D(Tx-Px)-B(Ty-Py)) / (AD-BC)
+	.if DETR40
+		lda z:det_r+0 ; 16.16f
+		sta z:math_b+0
+		lda z:det_r+2
+		sta z:math_b+2
+		jsr smul32ft ; (D(Tx-Px)-B(Ty-Py)) / (AD-BC) 16u
+	.else
+		lda z:det_r+1 ; 8.8f
+		sta z:math_b
+		jsr smul32f_16f ; 16u
+	.endif
 	clc
 	adc z:nmi_m7x ; Px + (D(Tx-Px)-B(Ty-Py)) / (AD-BC)
 	sec
