@@ -1524,6 +1524,11 @@ mode_a:
 ; - Player faces "up", and controls spin
 ; - L/R apply scale
 ;
+; In this mode Px,Py is pinned to an on-screen location, letting us rotate/scale around it.
+; and making movements relative to it. Ox,Oy is easy to calculate (see below),
+; and moving up/down is accomplished by adding B/D to our Px,Py.
+; (Similarly moving left/right could be done with A/C.)
+;
 
 MODE_B_SX = 128
 MODE_B_SY = 112
@@ -1633,19 +1638,32 @@ mode_b:
 	lda z:posy+2
 	sta z:nmi_m7y
 	; calculate hofs/vofs to put Px/Py at desired centre (equivalent to texel_to_screen with screen position in place of vofs/hofs)
-	jsr calc_det_r
-	lda #MODE_B_SX
-	sta z:nmi_hofs
-	lda #MODE_B_SY
-	sta z:nmi_vofs
+	; This would be a "generic" way to calculate it via texel_to_screen:
+	;	lda #MODE_B_SX
+	;	sta z:nmi_hofs
+	;	lda #MODE_B_SY
+	;	sta z:nmi_vofs
+	;	lda z:nmi_m7x
+	;	sta z:texelx
+	;	lda z:nmi_m7y
+	;	sta z:texely
+	;	jsr texel_to_screen
+	;	lda z:screenx
+	;	sta z:nmi_hofs
+	;	lda z:screeny
+	;	sta z:nmi_vofs
+	; However, because Tx,Ty = Px,Py the offset equation simplifies dramatically:
+	;   Ox = Px - Sx + (D(Tx-Px)-B(Ty-Py)) / (AD-BC)
+	;      = Px - Sx
+	;   Oy = Py - Sy + (A(Ty-Py)-C(Tx-Px)) / (AD-BC)
+	;      = Py - Sy
 	lda z:nmi_m7x
-	sta z:texelx
-	lda z:nmi_m7y
-	sta z:texely
-	jsr texel_to_screen
-	lda z:screenx
+	sec
+	sbc #MODE_B_SX
 	sta z:nmi_hofs
-	lda z:screeny
+	lda z:nmi_m7y
+	sec
+	sbc #MODE_B_SY
 	sta z:nmi_vofs
 	; player sprite
 	lda #MODE_B_SX
@@ -1656,6 +1674,7 @@ mode_b:
 	ldx #0
 	jsr oam_sprite
 	; sprite pinned to tilemap
+	jsr calc_det_r
 	lda #MODE_A_TX
 	sta z:texelx
 	lda #MODE_A_TY
