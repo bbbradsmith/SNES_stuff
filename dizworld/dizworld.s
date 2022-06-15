@@ -496,7 +496,8 @@ run:
 	ldx #$01
 	stx nmi_m7t+1
 	stx nmi_m7t+7
-	jsr set_mode_a
+	; TODO eventually set default mode Y?
+	jsr set_mode_b
 @loop:
 	; post a render update
 	jsr oamp_finish
@@ -810,7 +811,7 @@ oamp_hex16_space:
 	jmp oamp_space
 
 ;
-; Common
+; Math
 ;
 
 ; unsigned 16-bit multiply, 32-bit result
@@ -1220,12 +1221,20 @@ sincos_table:
 ;           = Mx * My
 ;
 
+;
+; In general in these examples calculating texel-to-screen (and the reciprocal determinant det_r) are time-intensive operations.
+; In most practical cases these can be simplified or avoided. For example:
+;  - Scale of 1 means det_r=1 and can be skipped entirely.
+;  - Fixed or limited scaling could have a constant det_r, or looked up from a small table.
+;  - In mode B, since Px,Py is mid-screen, Tx-Px,Ty-Py is always low for on-screen sprites. With appropriate culling texel_to_scale can be done at lower precision.
+;
+
 ; 1 for higher precision determinant reciprocal (more accurate under scaling)
 ;   adds about 10 more hardware multiplies to texel_to_screen (11 vs 9 scanlines?)
 DETR40 = 1
 
 ; recalculate det_r = 1 / (AD-BC) = Mx * My
-; used in texel_to_screen and other transformations
+; used by texel_to_screen
 calc_det_r:
 	lda z:scale2+0
 	sta z:math_a
