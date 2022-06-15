@@ -9,10 +9,10 @@
 ;  B - Rotate around player. (Overhead level).
 ;      D-pad to rotate or move.
 ;      L/R to scale.
-;  X - Tilted view.
+;  X - Tilted view. (TODO)
 ;      L/R to adjust tilt.
 ;      D-pad to move.
-;  Y - Flying view.
+;  Y - Flying view. (TODO)
 ;      D-pad to rotate or move.
 ;      L/R to raise/lower.
 ;      Start to toggle horizon glow.
@@ -25,6 +25,7 @@
 .i8
 
 ;
+; =============================================================================
 ; Header
 ;
 
@@ -61,6 +62,7 @@
 .word .loword(vector_irq)
 
 ;
+; =============================================================================
 ; RAM
 ;
 
@@ -127,6 +129,7 @@ nmi_hdma: .res 16 * 8 ; HDMA channel settings current
 BANK_RODATA = ^__RODATA_LOAD__
 
 ;
+; =============================================================================
 ; START stub for bank $00 dispatch
 ;
 
@@ -147,10 +150,17 @@ vector_reset:
 	jml reset
 
 ;
+; =============================================================================
 ; LOPRG stuff for the first bank (mapped at $C00000)
 ;
 
+; used for all code in this demo program
 .segment "LOPRG"
+
+;
+; =============================================================================
+; NMI
+;
 
 nmi:
 	; save registers
@@ -283,6 +293,11 @@ nmi:
 	rti
 	.a8
 	.i8
+
+;
+; =============================================================================
+; Startup
+;
 
 reset:
 	rep #$30
@@ -477,6 +492,7 @@ reset:
 	jmp run
 
 ;
+; =============================================================================
 ; main loop
 ;
 
@@ -494,9 +510,11 @@ run:
 	jsr oamp_start
 	; reset mode 7 transform matrix to identity (1,0) (0,1)
 	ldx #$01
-	stx nmi_m7t+1
-	stx nmi_m7t+7
+	stx z:nmi_m7t+1
+	stx z:nmi_m7t+7
 	; TODO eventually set default mode Y?
+	ldx #1
+	stx z:mode
 	jsr set_mode_b
 @loop:
 	; post a render update
@@ -598,7 +616,8 @@ run:
 	jmp @loop
 
 ;
-; OAM sprite
+; =============================================================================
+; OAM sprites
 ;
 
 oam_sprite_clear: ; move 4 sprites offscreen
@@ -680,6 +699,7 @@ oam_sprite: ; A = tile, X = OAM start index (x4), screenx,screeny location
 .byte %00111111
 
 ;
+; =============================================================================
 ; OAM printing
 ;
 
@@ -811,6 +831,7 @@ oamp_hex16_space:
 	jmp oamp_space
 
 ;
+; =============================================================================
 ; Math
 ;
 
@@ -1183,6 +1204,7 @@ sincos_table:
 ;    print(s)
 
 ;
+; =============================================================================
 ; Mode 7 calculations
 ;
 
@@ -1194,7 +1216,7 @@ sincos_table:
 ; Tx,Ty = texel coordinate
 ; Mx,My = horizontal texel scale, vertical texel scale
 ;
-; The official texel lookup:
+; Screen to texel (official formula):
 ;
 ;   [A B]   [Sx+Ox-Px]   [ Px ]   [ Tx ]
 ;   [   ] x [        ] + [    ] = [    ]
@@ -1222,27 +1244,30 @@ sincos_table:
 ;
 
 ;
-; In general in these examples calculating texel-to-screen (and the reciprocal determinant det_r) are time-intensive operations.
+; In general in these examples calculating texel_to_screen (and the reciprocal determinant det_r) are time-intensive operations.
+; The provided texel_to_screen is very generic, and with precision good enough for most purposes.
 ; In most practical cases these can be simplified or avoided. For example:
 ;  - Scale of 1 means det_r=1 and can be skipped entirely.
 ;  - Fixed or limited scaling could have a constant det_r, or looked up from a small table.
 ;  - In mode B, since Px,Py is mid-screen, Tx-Px,Ty-Py is always low for on-screen sprites. With appropriate culling texel_to_scale can be done at lower precision.
+;  - ABCD could be replaced by versions pre-scaled with 1/(AD-BC), avoiding its separate application.
+;  - Object positions might be stored in an alternative way (camera-relative, polar coordinates, etc.) that does not need as much transformation.
 ;
 
 ; 1 for higher precision determinant reciprocal (more accurate under scaling)
 ;   adds about 10 more hardware multiplies to texel_to_screen (11 vs 9 scanlines?)
 DETR40 = 1
 
-; recalculate det_r = 1 / (AD-BC) = Mx * My
+; recalculate det_r = 1 / (AD-BC) = 1 / (Mx * My)
 ; used by texel_to_screen
 calc_det_r:
-	lda z:scale2+0
+	lda z:scale2+0 ; Mx 8.8f
 	sta z:math_a
-	lda z:scale2+2
+	lda z:scale2+2 ; My 8.8f
 	sta z:math_b
-	jsr smul16f
+	jsr smul16f ; Mx * My 8.8f
 	jsr recip16f
-	lda z:math_p+0
+	lda z:math_p+0 ; 1 / (Mx * My) 16.16f
 	sta z:det_r+0
 	lda z:math_p+2
 	sta z:det_r+2
@@ -1467,6 +1492,7 @@ print_stats:
 	jmp oamp_return
 
 ;
+; =============================================================================
 ; Mode A test "Overhead, simple"
 ; - Map spins around a fixed point
 ; - Player moves over the rotated map
@@ -1474,6 +1500,8 @@ print_stats:
 ;
 ; The basic concept here is just to pin Px,Py in the middle of something you want to rotate/scale,
 ; and then scroll the screen to move it with hofs/vofs just a normal scroll offset relative to Px,Py.
+;
+; Useful for the "mode 7 background as a big boss sprite" idiom.
 ;
 
 ; pivot point for centre of the spin
@@ -1528,6 +1556,7 @@ mode_a:
 	jmp print_stats
 
 ;
+; =============================================================================
 ; Mode B test "Overhead, first person"
 ; - Map rotates around the player
 ; - Player faces "up", and controls spin
@@ -1537,6 +1566,8 @@ mode_a:
 ; and making movements relative to it. Ox,Oy is easy to calculate (see below),
 ; and moving up/down is accomplished by adding B/D to our Px,Py.
 ; (Similarly moving left/right could be done with A/C.)
+;
+; Similar to Contra 3 overhead stages.
 ;
 
 MODE_B_SX = 128
@@ -1696,11 +1727,14 @@ mode_b:
 	jmp print_stats
 
 ;
+; =============================================================================
 ; Mode X test "Tilted plane"
 ; - Map appears with perspective tilt, 1:1 at player centre
 ; - Player moves only orthogonally
 ; - L/R adjusts tilt amount?
 ;
+
+; TODO
 
 set_mode_x:
 	.a16
@@ -1715,10 +1749,13 @@ mode_x:
 	jmp simple_scroll
 
 ;
+; =============================================================================
 ; Mode Y test "Flying"
 ; - Mode 1 clouds at top, fixed colour horizon fades
 ; - Map rotates around the player
 ;
+
+; TODO
 
 set_mode_y:
 	.a16
@@ -1733,6 +1770,7 @@ mode_y:
 	rts
 
 ;
+; =============================================================================
 ; MAIN segment: flat HiROM space for more code, bulk data, etc.
 ;
 
