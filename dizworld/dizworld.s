@@ -111,14 +111,39 @@ oamp_i:       .res 2 ; OAM printing
 oamp_x:       .res 1
 oamp_y:       .res 1
 
+; perspective
+; inputs
+pv_buffer:    .res 1 ; 0/1 selects double buffer
+pv_l0:        .res 1 ; first scanline
+pv_l1:        .res 1 ; last scanline + 1
+pv_sh:        .res 2 ; vertical texel distance from l0 to l1
+pv_s0:        .res 2 ; horizontal texel distance at l0
+pv_s1:        .res 2 ; horizontal texel distance at l1
+; temporaries
+pv_zr:        .res 2 ; interpolated 1/Z
+pv_zr_inc:    .res 2 ; zr increment per line
+pv_scale:     .res 4 ; 8-bit scale of a/b/c/d
+pv_negate:    .res 1 ; negation of a/b/c/d
+
 .segment "LORAM" ; <$2000
 
-oam:      .res 512+32
+oam:          .res 512+32
 
 .segment "HIRAM" ; $FE bank < $8000
 
-new_hdma: .res 16 * 8 ; HDMA channel settings to apply at next update
-nmi_hdma: .res 16 * 8 ; HDMA channel settings current
+new_hdma:     .res 16 * 8 ; HDMA channel settings to apply at next update
+nmi_hdma:     .res 16 * 8 ; HDMA channel settings current
+
+; HDMA double-buffer for perspective
+pv_hdma_ab0:  .res 1024 ; Mode 7 matrix AB
+pv_hdma_cd0:  .res 1024 ; Mode 7 matrix CD
+pv_hdma_col0: .res 256 ; fixed colour for horizon fade
+pv_hdma_bgm0: .res 16 ; background mode
+pv_hdma_ab1:  .res 1024
+pv_hdma_cd1:  .res 1024
+pv_hdma_col1: .res 256
+pv_hdma_bgm1: .res 16
+PV_HDMA_STRIDE = pv_hdma_ab1 - pv_hdma_ab0
 
 .segment "RODATA" ; for data needed by code
 
@@ -148,6 +173,50 @@ vector_reset:
 	xce ; disable 6502 emulation
 	stz $4200 ; NMI off
 	jml reset
+
+;
+; =============================================================================
+; MAIN segment: flat HiROM space for more code, bulk data, etc.
+;
+
+.segment "MAIN"
+
+; if the assert happens, add some padding or an align to keep these from crossing a bank
+.macro BANKCHECK label_
+	.assert (^(*-1))=(^(label_)), error, "BANKCHECK fail."
+.endmacro
+
+.align $10000
+
+bin_vram: ; 64k block to initialize vram in one shot
+; mode 7 block (nmt+chr interleaved), 32k at VRAM 0
+md7_bg: .incbin "bg.md7"
+; sprites, 16k aligned
+.align $4000
+chr_fg: .incbin "fg.chr"
+; mode 1 sky chr, 4k aligned
+.align $1000
+chr_sky: .incbin "sky.chr"
+; mode 1 sky nmt, 2k aligned
+.align $800
+nmt_sky: .incbin "sky.nmt"
+BANKCHECK bin_vram
+
+VRAM_CHR_FG  = (chr_fg -bin_vram)>>1
+VRAM_CHR_SKY = (chr_sky-bin_vram)>>1
+VRAM_NMT_SKY = (nmt_sky-bin_vram)>>1
+
+.align $10000 ; next bank
+
+; palettes
+pal_bg: .incbin "bg.pal"
+pal_fg: .incbin "fg.pal"
+BANKCHECK pal_bg
+
+; for clearing
+byte00: .byte $00
+byteE0: .byte $E0
+byteAA: .byte $AA
 
 ;
 ; =============================================================================
@@ -541,7 +610,7 @@ run:
 	sta z:newpad
 	; pausing
 	lda z:newpad
-	and #$1000
+	and #$1000 ; start
 	beq :+
 		lda z:pause
 		eor #1
@@ -550,7 +619,7 @@ run:
 	:
 	; aspect ratio correction
 	lda z:newpad
-	and #$2000
+	and #$2000 ; select
 	beq :+
 		lda z:aspect
 		eor #1
@@ -1249,7 +1318,8 @@ sincos_table:
 ; In most practical cases these can be simplified or avoided. For example:
 ;  - Scale of 1 means det_r=1 and can be skipped entirely.
 ;  - Fixed or limited scaling could have a constant det_r, or looked up from a small table.
-;  - In mode B, since Px,Py is mid-screen, Tx-Px,Ty-Py is always low for on-screen sprites. With appropriate culling texel_to_scale can be done at lower precision.
+;  - If Px,Py is always mid-screen, Tx-Px,Ty-Py will be low for on-screen sprites.
+;    With appropriate culling of distant objects, texel_to_scale can be done at lower precision.
 ;  - ABCD could be replaced by versions pre-scaled with 1/(AD-BC), avoiding its separate application.
 ;  - Object positions might be stored in an alternative way (camera-relative, polar coordinates, etc.) that does not need as much transformation.
 ;
@@ -1446,6 +1516,128 @@ simple_rot_scale: ; LR shoulder = scale adjust, build ABCD from angle/scale
 		sta z:scale2+0 ; Mx *= 8/7
 	:
 	rts
+
+;
+; =============================================================================
+; Perspective View
+;
+
+pv_buffer_x: ; sets X to 0 or PV_HDMA_STRIDE to select the needed buffer
+	.a8
+	.i16
+	lda z:pv_buffer
+	beq :+
+		ldx #PV_HDMA_STRIDE
+		rts
+	:
+		ldx #0
+		rts
+	;
+
+; rebuild the perspective HDMA tables (only needed if pv input variables or angle change, moving the origin only does not require a rebuild)
+pv_rebuild:
+	php
+	phb
+	sep #$20
+	rep #$10
+	.a8
+	.i16
+	lda #$7E
+	pha
+	plb
+	; 1. flip the double buffer
+	lda z:pv_buffer
+	eor #1
+	sta z:pv_buffer
+	; 2. calculate BG mode table (pv_hdma_bgm)
+	jsr pv_buffer_x
+	lda z:pv_l0
+	beq @bgm_end
+	dec ; (actually need to set on scanline before L0)
+	beq @bgm_end
+	sta z:temp
+	@bgm_mode: ; use nmi_bgmode until L0
+		cmp #127
+		bcc :+
+			lda #127
+		:
+		sta a:pv_hdma_bgm0+0, X
+		eor #$FF
+		sec
+		adc z:temp
+		sta z:temp
+		lda z:nmi_bgmode
+		sta a:pv_hdma_bgm0+1, X
+		inx
+		inx
+		lda z:temp
+		bne @bgm_mode
+	@bgm_end:
+	; set mode 7 at L0
+	lda #1
+	sta a:pv_hdma_bgm0+0, X
+	lda #7
+	sta a:pv_hdma_bgm0+1, X
+	; end of table
+	stz a:pv_hdma_bgm0+2, X
+	; 3. calculate color fade
+	jsr pv_buffer_x
+	lda z:pv_l0
+	sec
+	sbc #16
+	; TODO
+	; 4. calculate ABCD
+	; TODO
+	; 5. set HDMA tables for next frame
+	lda #$01
+	sta z:new_hdma_en ; enable HDMA 0 (TODO 1,2,3)
+	stz a:new_hdma+(0*16)+0 ; bgm: 1 byte transfer
+	lda #3
+	sta a:new_hdma+(1*16)+0 ; AB: 4 byte transfer
+	sta a:new_hdma+(2*16)+0 ; CD: 4 byte transfer
+	stz a:new_hdma+(3*16)+0 ; col: 1 byte transfer
+	lda #$05
+	sta a:new_hdma+(0*16)+1 ; bgm: $2105 BGMODE
+	lda #$1B
+	sta a:new_hdma+(1*16)+1 ; AB: $211B M7A
+	lda #$1D
+	sta a:new_hdma+(2*16)+1 ; CD: $211D M7C
+	lda #$32
+	sta a:new_hdma+(3*16)+1 ;
+	lda #$7E
+	sta a:new_hdma+(0*16)+4 ; bank
+	sta a:new_hdma+(1*16)+4
+	sta a:new_hdma+(2*16)+4
+	sta a:new_hdma+(3*16)+4
+	jsr pv_buffer_x
+	stx z:temp
+	rep #$20
+	.a16
+	lda #.loword(pv_hdma_bgm0)
+	clc
+	adc z:temp
+	sta a:new_hdma+(0*16)+2
+	lda #.loword(pv_hdma_ab0)
+	clc
+	adc z:temp
+	sta a:new_hdma+(1*16)+2
+	lda #.loword(pv_hdma_cd0)
+	clc
+	adc z:temp
+	sta a:new_hdma+(2*16)+2
+	lda #.loword(pv_hdma_col0)
+	clc
+	adc z:temp
+	sta a:new_hdma+(3*16)+2
+	; restore register sizes, data bank, and return
+	plb
+	plp
+	rts
+
+;
+; =============================================================================
+; Utilities
+;
 
 print_stats:
 	.a16
@@ -1741,6 +1933,10 @@ mode_b:
 ;
 
 ; TODO
+; is really just a copy of mode X but:
+; 1. only recalculate when we tilt with L/R to demonstrate how it's not needed
+; 2. just disable colormath to hide the fade
+; 3. mode 1 background setup doesn't matter
 
 set_mode_x:
 	.a16
@@ -1762,59 +1958,39 @@ mode_x:
 ;
 
 ; TODO
+; set fixed color fade
+; angle rotation should adjust scrollx on mode1 map proportional to S0?
 
 set_mode_y:
 	.a16
 	.i8
+	; HACK
+	lda #64
+	sta pv_l0
+	lda #200
+	sta pv_l1
+	; TODO
 	ldx #1
 	stx z:nmi_bgmode
-	ldx #0
-	stx new_hdma_en
 	jsr oam_sprite_clear
+	jsr pv_rebuild
 mode_y:
+	; HACK down/up for L0
+	lda z:gamepad
+	and #$0400
+	beq :+
+		ldx z:pv_l0
+		inx
+		stx z:pv_l0
+		jsr pv_rebuild
+	:
+	lda z:gamepad
+	and #$0800
+	beq :+
+		ldx z:pv_l0
+		dex
+		stx z:pv_l0
+		jsr pv_rebuild
+	:
 	jsr simple_scroll ; TODO
 	rts
-
-;
-; =============================================================================
-; MAIN segment: flat HiROM space for more code, bulk data, etc.
-;
-
-.segment "MAIN"
-
-; if the assert happens, add some padding or an align to keep these from crossing a bank
-.macro BANKCHECK label_
-	.assert (^(*-1))=(^(label_)), error, "BANKCHECK fail."
-.endmacro
-
-.align $10000
-
-bin_vram: ; 64k block to initialize vram in one shot
-; mode 7 block (nmt+chr interleaved), 32k at VRAM 0
-md7_bg: .incbin "bg.md7"
-; sprites, 16k aligned
-.align $4000
-chr_fg: .incbin "fg.chr"
-; mode 1 sky chr, 4k aligned
-.align $1000
-chr_sky: .incbin "sky.chr"
-; mode 1 sky nmt, 2k aligned
-.align $800
-nmt_sky: .incbin "sky.nmt"
-BANKCHECK bin_vram
-
-VRAM_CHR_FG  = (chr_fg -bin_vram)>>1
-VRAM_CHR_SKY = (chr_sky-bin_vram)>>1
-VRAM_NMT_SKY = (nmt_sky-bin_vram)>>1
-
-.align $10000 ; next bank
-
-; palettes
-pal_bg: .incbin "bg.pal"
-pal_fg: .incbin "fg.pal"
-BANKCHECK pal_bg
-
-; for clearing
-byte00: .byte $00
-byteE0: .byte $E0
-byteAA: .byte $AA
