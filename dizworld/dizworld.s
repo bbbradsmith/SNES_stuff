@@ -139,12 +139,16 @@ nmi_hdma:     .res 16 * 8 ; HDMA channel settings current
 ; HDMA double-buffer for perspective
 pv_hdma_ab0:  .res 1024 ; Mode 7 matrix AB
 pv_hdma_cd0:  .res 1024 ; Mode 7 matrix CD
-pv_hdma_col0: .res 256 ; fixed colour for horizon fade
 pv_hdma_bgm0: .res 16 ; background mode
+pv_hdma_abi0: .res 16 ; indirection for AB
+pv_hdma_cdi0: .res 16 ; indirection for CD
+pv_hdma_col0: .res 16 ; fixed colour for horizon fade (indirect)
 pv_hdma_ab1:  .res 1024
 pv_hdma_cd1:  .res 1024
-pv_hdma_col1: .res 256
 pv_hdma_bgm1: .res 16
+pv_hdma_abi1: .res 16
+pv_hdma_cdi1: .res 16
+pv_hdma_col1: .res 16
 PV_HDMA_STRIDE = pv_hdma_ab1 - pv_hdma_ab0
 
 .segment "RODATA" ; for data needed by code
@@ -587,10 +591,7 @@ run:
 	ldx #$01
 	stx z:nmi_m7t+1
 	stx z:nmi_m7t+7
-	; TODO eventually set default mode Y?
-	ldx #1
-	stx z:mode
-	jsr set_mode_b
+	jmp @set_mode_y
 @loop:
 	; post a render update
 	jsr oamp_finish
@@ -914,16 +915,23 @@ oamp_hex16_space:
 ;   inputs:  math_a, math_b, A register
 ;   outputs: math_p, math_r, A register
 ;   values are unsigned (u16), signed (s16), either (16) or fixed point (8.8)
+;   .a16 .i8 assumed
 ;
-; umul16:         u16 a x    u16 b =  u32 p                clobbers A/X/Y
-; mul16t:          16 a x     16 b =   16 A/p (truncated)  clobbers A/X/Y
-; smul16:         s16 a x    s16 b =   32 p,               clobbers A/X/Y
-; smul16f:       s8.8 a x   s8.8 b = s8.8 A = s16.16 p     clobbers A/X/Y
-; smul32f_16f:  s24.8 a x   s8.8 b = s8.8 A =  s8.24 p     clobbers A/X/Y,a,b
-; smul32ft:     s24.8 a x s16.16 b = s8.8 A = s16.24 r     clobbers A/X/Y,a,b,temp0-13
-; udiv16:         u16 a /    u16 b =  u16 p %=   u16 r     clobbers A/X
-; udiv32:         u32 a /    u32 b =  u32 p %=   u32 r     clobbers A/X
+; umul16:         u16 a *    u16 b =  u32 p                clobbers A/X/Y
+; smul16:         s16 a *    s16 b =   32 p,               clobbers A/X/Y
+; mul16t:          16 a *     16 b =   16 A/p (truncated)  clobbers A/X/Y
+; smul16f:       s8.8 a *   s8.8 b = s8.8 A = s16.16 p     clobbers A/X/Y
+; smul32f_16f:  s24.8 a *   s8.8 b = s8.8 A =  s8.24 p     clobbers A/X/Y,a,b
+; smul32ft:     s24.8 a * s16.16 b = s8.8 A = s16.24 r     clobbers A/X/Y,a,b,temp0-13
+;
+; udiv16:         u16 a /    u16 b =  u16 p    % u16 r     clobbers A/X
+; udiv32:         u32 a /    u32 b =  u32 p    % u32 r     clobbers A/X
 ; recip16f:           1 /   s8.8 A = s8.8 A = s16.16 p     clobbers A/X,a,b
+;
+; sign:         A = value, returns either 0 or $FFFF       preserves flags (.i8/.i16 allowed)
+; sincos:       A = angle 0-255, result in cosa/sina       clobbers A/X
+
+; TODO time these routines and give estimates
 
 ; unsigned 16-bit multiply, 32-bit result
 ; Written by 93143: https://forums.nesdev.org/viewtopic.php?p=280089#p280089
@@ -958,6 +966,27 @@ umul16: ; math_a x math_b = math_p, clobbers A/X/Y
 	sta z:math_p+2    ; 00AA + 0BB0 + 0CC0 + DD00
 	rts
 
+; signed 16-bit multiply, 32-bit result, clobbers A/X/Y
+smul16:
+	.a16
+	.i8
+	jsr umul16
+	; A = math_p+2
+	; X = math_a+1
+	; Y = math_b+1
+	cpx #$80
+	bcc :+
+		;sec
+		sbc z:math_b ; sign extend math_a: (-1 << 16) x math_b
+	:
+	cpy #$80
+	bcc :+
+		;sec
+		sbc z:math_a ; sign extend math_b: (-1 << 16) x math_a
+	:
+	sta z:math_p+2
+	rts
+
 ; 16-bit multiply, truncated 16-bit result (sign-agnostic), clobbers A/X/Y
 mul16t:
 	.a16
@@ -982,27 +1011,6 @@ mul16t:
 	tax
 	stx z:math_p+1
 	lda z:math_p+0
-	rts
-
-; signed 16-bit multiply, 32-bit result, clobbers A/X/Y
-smul16:
-	.a16
-	.i8
-	jsr umul16
-	; A = math_p+2
-	; X = math_a+1
-	; Y = math_b+1
-	cpx #$80
-	bcc :+
-		;sec
-		sbc z:math_b ; sign extend math_a: (-1 << 16) x math_b
-	:
-	cpy #$80
-	bcc :+
-		;sec
-		sbc z:math_a ; sign extend math_b: (-1 << 16) x math_a
-	:
-	sta z:math_p+2
 	rts
 
 smul16f: ; smul16 but returning the middle 16-bit value as A (i.e. 8.8 fixed point multiply)
@@ -1582,7 +1590,7 @@ pv_rebuild:
 	jsr pv_buffer_x
 	lda z:pv_l0
 	beq @bgm_end
-	dec ; (actually need to set on scanline before L0)
+	dec ; need to set on scanline before L0
 	beq @bgm_end
 	sta z:temp
 	@bgm_mode: ; use nmi_bgmode until L0
@@ -1654,6 +1662,7 @@ pv_rebuild:
 	;   Acceptable ranges are set by the fixed point precision. These could be adjusted to trade precision for more/less range:
 	;   - S0/S1 should be <1024: 2.6 precision goes from 0 to 4x-1 scale
 	;   - SH scale should be less than <2x S0 scale: 1.7 precision goes from 0 to 2x-1 relative scale.
+	;   - L0<L1, L1<254 (L1 should probably always be 224)
 	;
 	; setup:
 	;   ZR0 = (1<<21)/S0              ; 11.21 / 8.8 (S0) = 19.13, truncated to 3.13
@@ -1667,6 +1676,8 @@ pv_rebuild:
 	;   c = z * -sin(angle)      >> 5
 	;   d = z *  cos(angle) * SA >> 5
 	;
+	; Setup
+	; -----
 	rep #$20
 	sep #$10
 	.a16
@@ -1808,33 +1819,165 @@ pv_rebuild:
 	:
 	tax
 	stx z:pv_scale+2 ; scale C = SA * sin / 2
-	; generate top of buffer
+	; generate HDMA indirection buffers
+	; ---------------------------------
 	sep #$20
 	rep #$10
 	.a8
 	.i16
-	; TODO pv_buffer_x, etc.
-	; L0 again
-	; temp+1 = even scanline count
-	; store pv_buffer_x for linear interpolation later
+	jsr pv_buffer_x
+	stx z:temp+4 ; pv_buffer_x
+	stx z:temp+6 ; pv_buffer_x
+	rep #$20
+	.a16
+	lda z:pv_l0
+	and #$00FF
+	beq @abcdi_head_end
+	dec ;set on scanline before L0
+	beq @abcdi_head_end
+	sta z:temp+2 ; L0 
+	@abcdi_head:
+		cmp #128
+		bcc :+
+			lda #128
+		:
+		sta a:pv_hdma_abi0+0, X
+		sta a:pv_hdma_cdi0+0, X
+		eor #$FF
+		sec
+		adc z:temp+2
+		and #$00FF
+		sta z:temp+2
+		; these could be skipped, as the values won't display anyway
+		lda #.loword(pv_hdma_ab0)
+		clc
+		adc z:temp+4
+		sta a:pv_hdma_abi0+1, X
+		lda #.loword(pv_hdma_cd0)
+		clc
+		adc z:temp+4
+		sta a:pv_hdma_cdi0+1, X
+		; next group
+		inx
+		inx
+		inx
+		lda z:temp+2
+		bne @abcdi_head
+	@abcdi_head_end:
+	lda z:temp+0 ; L1-L0 (scanline count)
+	and #$00FF
+	sta z:temp+2
+	@abcdi_body:
+		cmp #127 ; repeat mode maxes at 127
+		bcc :+
+			lda #127
+		:
+		eor #$80 ; repeat mode
+		sta a:pv_hdma_abi0+0, X
+		sta a:pv_hdma_cdi0+0, X
+		eor #$7F
+		sec
+		adc z:temp+2
+		and #$00FF
+		sta z:temp+2
+		lda #.loword(pv_hdma_ab0)
+		clc
+		adc z:temp+4
+		sta a:pv_hdma_abi0+1, X
+		lda #.loword(pv_hdma_cd0)
+		clc
+		adc z:temp+4
+		sta a:pv_hdma_cdi0+1, X
+		inx
+		inx
+		inx
+		lda z:temp+2
+		beq @abcdi_body_end
+		lda z:temp+4 ; if split 127 + rest, add the offset
+		clc
+		adc #(127*4)
+		sta z:temp+4
+		lda z:temp+2
+		bra @abcdi_body
+	@abcdi_body_end:
+	stz a:pv_hdma_abi0+0, X ; terminate table
+	stz a:pv_hdma_cdi0+0, X
 	; Generate even scanlines with perspective correction
 	; ---------------------------------------------------
-	; TODO
+	.a16
+	.i16
+	; temp+1 = even scanline count
+	; temp+6/7 = pv_buffer_x
+	ldx z:temp+6
+	lda z:temp+1
+	and #$00FF
+	sta z:temp+2 ; temp+2/3 = countdown
+	:
+		; TODO HACK just putting countdown into these for now
+		sta a:pv_hdma_ab0+0, X
+		sta a:pv_hdma_ab0+2, X
+		sta a:pv_hdma_cd0+0, X
+		sta a:pv_hdma_cd0+2, X
+		; ...
+		txa
+		clc
+		adc #8
+		tax
+		dec z:temp+2
+		bne :-
 	; Generate odd scanlines with linear interpolation, apply negation
 	; ----------------------------------------------------------------
-	; TODO
+	.a16
+	.i16
+	ldx z:temp+6 ; pv_buffer_x
+	lda z:temp+1 ; even scanline count
+	and #$00FF
+	beq :++
+	dec ; no interpolated value after final scanline
+	beq :++
+	sta z:temp+2 ; temp+2/3 = countdown
+	:
+		; TODO should be negating as well (unless we do that in the other loop? maybe it can fill multiply time)
+		lda a:pv_hdma_ab0+ 0, X
+		clc
+		adc a:pv_hdma_ab0+ 8, X
+		ror
+		sta a:pv_hdma_ab0+ 4, X
+		lda a:pv_hdma_ab0+ 2, X
+		clc
+		adc a:pv_hdma_ab0+10, X
+		ror
+		sta a:pv_hdma_ab0+ 6, X
+		lda a:pv_hdma_cd0+ 0, X
+		clc
+		adc a:pv_hdma_cd0+ 8, X
+		ror
+		sta a:pv_hdma_cd0+ 4, X
+		lda a:pv_hdma_cd0+ 2, X
+		clc
+		adc a:pv_hdma_cd0+10, X
+		ror
+		sta a:pv_hdma_cd0+ 6, X
+		; ...
+		txa
+		clc
+		adc #8
+		tax
+		dec z:temp+2
+		bne :-
+	:
 	sep #$20
 	rep #$10
 	.a8
 	.i16
 	; 5. set HDMA tables for next frame
 	; =================================
-	lda #$09 ; (TODO 1,2 for ABCD)
-	sta z:new_hdma_en ; enable HDMA
+	lda #$0F
+	sta z:new_hdma_en ; enable HDMA (0,1,2,3)
 	stz a:new_hdma+(0*16)+0 ; bgm: 1 byte transfer
-	lda #3
-	sta a:new_hdma+(1*16)+0 ; AB: 4 byte transfer
-	sta a:new_hdma+(2*16)+0 ; CD: 4 byte transfer
+	lda #$43
+	sta a:new_hdma+(1*16)+0 ; AB: 4 byte transfer, indirect
+	sta a:new_hdma+(2*16)+0 ; CD: 4 byte transfer, indirect
 	lda #$40
 	sta a:new_hdma+(3*16)+0 ; col: 1 byte transfer, indirect
 	lda #$05
@@ -1850,8 +1993,10 @@ pv_rebuild:
 	sta a:new_hdma+(1*16)+4
 	sta a:new_hdma+(2*16)+4
 	sta a:new_hdma+(3*16)+4
+	sta a:new_hdma+(1*16)+7 ; indirect bank
+	sta a:new_hdma+(2*16)+7
 	lda #^pv_fade_table0
-	sta a:new_hdma+(3*16)+7 ; indirect bank
+	sta a:new_hdma+(3*16)+7
 	jsr pv_buffer_x
 	stx z:temp
 	rep #$20
@@ -1860,11 +2005,11 @@ pv_rebuild:
 	clc
 	adc z:temp
 	sta a:new_hdma+(0*16)+2
-	lda #.loword(pv_hdma_ab0)
+	lda #.loword(pv_hdma_abi0)
 	clc
 	adc z:temp
 	sta a:new_hdma+(1*16)+2
-	lda #.loword(pv_hdma_cd0)
+	lda #.loword(pv_hdma_cdi0)
 	clc
 	adc z:temp
 	sta a:new_hdma+(2*16)+2
@@ -2221,7 +2366,7 @@ set_mode_y:
 	; HACK
 	lda #64
 	sta pv_l0
-	lda #200
+	lda #224
 	sta pv_l1
 	; TODO
 	ldx #0
@@ -2242,6 +2387,8 @@ mode_y:
 	beq :+
 		ldx z:pv_l0
 		inx
+		cpx z:pv_l1
+		bcs :+
 		stx z:pv_l0
 		jsr pv_rebuild
 	:
@@ -2249,6 +2396,7 @@ mode_y:
 	and #$0800
 	beq :+
 		ldx z:pv_l0
+		beq :+
 		dex
 		stx z:pv_l0
 		jsr pv_rebuild
