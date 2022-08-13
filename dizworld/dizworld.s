@@ -103,6 +103,8 @@ nmi_vofs:     .res 2
 nmi_m7t:      .res 8
 nmi_m7x:      .res 2
 nmi_m7y:      .res 2
+nmi_cgwsel:   .res 1
+nmi_cgadsub:  .res 1
 
 new_hdma_en:  .res 1 ; HDMA channel enable at next update
 nmi_hdma_en:  .res 1 ; HDMA channel enable currently
@@ -309,6 +311,10 @@ nmi:
 	sta $2120 ; M7F
 	lda z:nmi_m7y+1
 	sta $2120
+	lda z:nmi_cgwsel
+	sta $2130 ; CGWSEL
+	lda z:nmi_cgadsub
+	sta $2131 ; CGADSUB
 	; 3. OAM DMA
 	stz $2102
 	stz $2103
@@ -1522,6 +1528,14 @@ simple_rot_scale: ; LR shoulder = scale adjust, build ABCD from angle/scale
 ; Perspective View
 ;
 
+; indirect COLDATA tables for fade
+pv_fade_table0: ; black for top of screen
+.byte $E0
+pv_fade_table1:
+.byte $E1, $E1, $E1, $E2, $E2, $E2, $E3, $E3, $E3, $E4, $E4, $E5, $E5, $E6, $E6, $E7 ; 16 lines at bottom of sky
+.byte $FC, $FA, $F7, $F4, $F1, $EE, $EC, $EA, $E8, $E6, $E5, $E4, $E3, $E2, $E1, $E0 ; 16 lines at top of ground
+
+
 pv_buffer_x: ; sets X to 0 or PV_HDMA_STRIDE to select the needed buffer
 	.a8
 	.i16
@@ -1578,24 +1592,52 @@ pv_rebuild:
 	sta a:pv_hdma_bgm0+0, X
 	lda #7
 	sta a:pv_hdma_bgm0+1, X
-	; end of table
-	stz a:pv_hdma_bgm0+2, X
-	; 3. calculate color fade
+	stz a:pv_hdma_bgm0+2, X ; end of table
+	; 3. calculate color fade (indirect table)
 	jsr pv_buffer_x
 	lda z:pv_l0
 	sec
-	sbc #16
-	; TODO
+	sbc #(16+1)
+	sta z:temp+0
+	stz z:temp+1
+	@col_fade: ; black until L0-16
+		cmp #127
+		bcc :+
+			lda #127
+		:
+		sta a:pv_hdma_col0+0, X
+		eor #$FF
+		sec
+		adc z:temp+0
+		sta z:temp+0
+		lda #<pv_fade_table0
+		sta a:pv_hdma_col0+1, X
+		lda #>pv_fade_table0
+		sta a:pv_hdma_col0+2, X
+		inx
+		inx
+		inx
+		lda z:temp+0
+		bne @col_fade
+	; 32 lines from table
+	lda #$80 | 32
+	sta a:pv_hdma_col0+0, X
+	lda #<pv_fade_table1
+	sta a:pv_hdma_col0+1, X
+	lda #>pv_fade_table1
+	sta a:pv_hdma_col0+2, X
+	stz a:pv_hdma_col0+3, X ; end of table
 	; 4. calculate ABCD
 	; TODO
 	; 5. set HDMA tables for next frame
-	lda #$01
-	sta z:new_hdma_en ; enable HDMA 0 (TODO 1,2,3)
+	lda #$09 ; (TODO 1,2 for ABCD)
+	sta z:new_hdma_en ; enable HDMA
 	stz a:new_hdma+(0*16)+0 ; bgm: 1 byte transfer
 	lda #3
 	sta a:new_hdma+(1*16)+0 ; AB: 4 byte transfer
 	sta a:new_hdma+(2*16)+0 ; CD: 4 byte transfer
-	stz a:new_hdma+(3*16)+0 ; col: 1 byte transfer
+	lda #$40
+	sta a:new_hdma+(3*16)+0 ; col: 1 byte transfer, indirect
 	lda #$05
 	sta a:new_hdma+(0*16)+1 ; bgm: $2105 BGMODE
 	lda #$1B
@@ -1603,12 +1645,14 @@ pv_rebuild:
 	lda #$1D
 	sta a:new_hdma+(2*16)+1 ; CD: $211D M7C
 	lda #$32
-	sta a:new_hdma+(3*16)+1 ;
+	sta a:new_hdma+(3*16)+1 ; col: $3132 COLDATA
 	lda #$7E
 	sta a:new_hdma+(0*16)+4 ; bank
 	sta a:new_hdma+(1*16)+4
 	sta a:new_hdma+(2*16)+4
 	sta a:new_hdma+(3*16)+4
+	lda #^pv_fade_table0
+	sta a:new_hdma+(3*16)+7 ; indirect bank
 	jsr pv_buffer_x
 	stx z:temp
 	rep #$20
@@ -1638,6 +1682,13 @@ pv_rebuild:
 ; =============================================================================
 ; Utilities
 ;
+
+colmath_off:
+	.i8
+	ldx #0
+	stx z:nmi_cgwsel
+	stx z:nmi_cgadsub
+	rts
 
 print_stats:
 	.a16
@@ -1715,6 +1766,7 @@ MODE_A_TY = 115
 set_mode_a:
 	.a16
 	.i8
+	jsr colmath_off
 	ldx #7
 	stx z:nmi_bgmode
 	ldx #0
@@ -1774,6 +1826,7 @@ MODE_B_SY = 112
 set_mode_b:
 	.a16
 	.i8
+	jsr colmath_off
 	ldx #7
 	stx z:nmi_bgmode
 	ldx #0
@@ -1937,10 +1990,12 @@ mode_b:
 ; 1. only recalculate when we tilt with L/R to demonstrate how it's not needed
 ; 2. just disable colormath to hide the fade
 ; 3. mode 1 background setup doesn't matter
+; 4. simplified world to pixel calculation with no rotation?
 
 set_mode_x:
 	.a16
 	.i8
+	jsr colmath_off
 	ldx #7
 	ldx #3 ; mode 3 HACK
 	stx z:nmi_bgmode
@@ -1970,6 +2025,13 @@ set_mode_y:
 	lda #200
 	sta pv_l1
 	; TODO
+	ldx #0
+	stx $2130
+	; colormath
+	ldx #$00
+	stx z:nmi_cgwsel ; fixed colour
+	ldx #$01
+	stx z:nmi_cgadsub ; enable additive blend on BG1
 	ldx #1
 	stx z:nmi_bgmode
 	jsr oam_sprite_clear
