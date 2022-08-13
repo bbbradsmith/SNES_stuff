@@ -1532,7 +1532,7 @@ simple_rot_scale: ; LR shoulder = scale adjust, build ABCD from angle/scale
 pv_fade_table0: ; black for top of screen
 .byte $E0
 pv_fade_table1:
-.byte $E1, $E1, $E1, $E2, $E2, $E2, $E3, $E3, $E3, $E4, $E4, $E5, $E5, $E6, $E6, $E7 ; 16 lines at bottom of sky
+.byte $E0, $E0, $E0, $E0, $E0, $E0, $E0, $E0, $E0, $E1, $E2, $E3, $E4, $E5, $E6, $E7 ; 16 lines at bottom of sky
 .byte $FC, $FA, $F7, $F4, $F1, $EE, $EC, $EA, $E8, $E6, $E5, $E4, $E3, $E2, $E1, $E0 ; 16 lines at top of ground
 
 
@@ -1571,9 +1571,9 @@ pv_rebuild:
 	beq @bgm_end
 	sta z:temp
 	@bgm_mode: ; use nmi_bgmode until L0
-		cmp #127
+		cmp #128
 		bcc :+
-			lda #127
+			lda #128
 		:
 		sta a:pv_hdma_bgm0+0, X
 		eor #$FF
@@ -1601,9 +1601,9 @@ pv_rebuild:
 	sta z:temp+0
 	stz z:temp+1
 	@col_fade: ; black until L0-16
-		cmp #127
+		cmp #128
 		bcc :+
-			lda #127
+			lda #128
 		:
 		sta a:pv_hdma_col0+0, X
 		eor #$FF
@@ -2030,8 +2030,8 @@ set_mode_y:
 	; colormath
 	ldx #$00
 	stx z:nmi_cgwsel ; fixed colour
-	ldx #$01
-	stx z:nmi_cgadsub ; enable additive blend on BG1
+	ldx #$21
+	stx z:nmi_cgadsub ; enable additive blend on BG1 + backdrop
 	ldx #1
 	stx z:nmi_bgmode
 	jsr oam_sprite_clear
