@@ -910,6 +910,21 @@ oamp_hex16_space:
 ; Math
 ;
 
+; summary of available subroutines:
+;   inputs:  math_a, math_b, A register
+;   outputs: math_p, math_r, A register
+;   values are unsigned (u16), signed (s16), either (16) or fixed point (8.8)
+;
+; umul16:         u16 a x    u16 b =  u32 p                clobbers A/X/Y
+; mul16t:          16 a x     16 b =   16 A/p (truncated)  clobbers A/X/Y
+; smul16:         s16 a x    s16 b =   32 p,               clobbers A/X/Y
+; smul16f:       s8.8 a x   s8.8 b = s8.8 A = s16.16 p     clobbers A/X/Y
+; smul32f_16f:  s24.8 a x   s8.8 b = s8.8 A =  s8.24 p     clobbers A/X/Y,a,b
+; smul32ft:     s24.8 a x s16.16 b = s8.8 A = s16.24 r     clobbers A/X/Y,a,b,temp0-13
+; udiv16:         u16 a /    u16 b =  u16 p %=   u16 r     clobbers A/X
+; udiv32:         u32 a /    u32 b =  u32 p %=   u32 r     clobbers A/X
+; recip16f:           1 /   s8.8 A = s8.8 A = s16.16 p     clobbers A/X,a,b
+
 ; unsigned 16-bit multiply, 32-bit result
 ; Written by 93143: https://forums.nesdev.org/viewtopic.php?p=280089#p280089
 umul16: ; math_a x math_b = math_p, clobbers A/X/Y
@@ -943,7 +958,7 @@ umul16: ; math_a x math_b = math_p, clobbers A/X/Y
 	sta z:math_p+2    ; 00AA + 0BB0 + 0CC0 + DD00
 	rts
 
-; 16-bit multiply, truncated 16-bit result (sign-agnostic)
+; 16-bit multiply, truncated 16-bit result (sign-agnostic), clobbers A/X/Y
 mul16t:
 	.a16
 	.i8
@@ -997,7 +1012,7 @@ smul16f: ; smul16 but returning the middle 16-bit value as A (i.e. 8.8 fixed poi
 	lda z:math_p+1
 	rts
 
-smul32f_16f: ; a = 24.8 fixed, b = 8.8 fixed, clobbers: math_a/math_b
+smul32f_16f: ; a = 24.8 fixed, b = 8.8 fixed, result in A = 8.8, clobbers: math_a/math_b
 	.a16
 	.i8
 	lda z:math_a+0
@@ -1039,7 +1054,7 @@ smul32f_16f: ; a = 24.8 fixed, b = 8.8 fixed, clobbers: math_a/math_b
 	lda z:math_p+2 ; result in upper bits
 	rts
 
-smul32ft: ; a = 24.8 fixed, b = 16.16 fixed, 40-bit result in math_r, returns top 16 bits, clobbers temp
+smul32ft: ; a = 24.8 fixed, b = 16.16 fixed, 16.24 result in math_r, returns 8.8 in A, clobbers math_a/b, temp0-13
 	.a16
 	.i8
 	; sign extend and copy to temp
@@ -1196,7 +1211,7 @@ recip16f: ; A = fixed point number, result in A
 		eor z:math_b+0
 		inc
 		sta z:math_b+0
-		ldy #1
+		ldy #1 ; Y indicates negate at end
 	:
 	; numerator: 1.0 << 16
 	stz z:math_a+0
@@ -1563,6 +1578,7 @@ pv_rebuild:
 	eor #1
 	sta z:pv_buffer
 	; 2. calculate BG mode table (pv_hdma_bgm)
+	; ========================================
 	jsr pv_buffer_x
 	lda z:pv_l0
 	beq @bgm_end
@@ -1592,7 +1608,8 @@ pv_rebuild:
 	lda #7
 	sta a:pv_hdma_bgm0+1, X
 	stz a:pv_hdma_bgm0+2, X ; end of table
-	; 3. calculate color fade (indirect table)
+	; 3. calculate color fade (indirect table, pv_hdma_col)
+	; =====================================================
 	jsr pv_buffer_x
 	lda z:pv_l0
 	sec
@@ -1627,8 +1644,191 @@ pv_rebuild:
 	sta a:pv_hdma_col0+2, X
 	stz a:pv_hdma_col0+3, X ; end of table
 	; 4. calculate ABCD
+	; =================
+	; overview of calculation:
+	;   Interpolating from S0 to S1 texel scales, with perspective correction,
+	;   meaning that for Z proportional to S0/S1, 1/Z interpolates linearly down the screen.
+	;   So: 1/Z is interpolated, and used to recover the corrected Z.
+	;   Finally, it's multiplied by the rotation matrix, and the vertical values receive a relative scaling.
+	;   Various shifts are applied to make the fixed point precision practical.
+	;   Acceptable ranges are set by the fixed point precision. These could be adjusted to trade precision for more/less range:
+	;   - S0/S1 should be <1024: 2.6 precision goes from 0 to 4x-1 scale
+	;   - SH scale should be less than <2x S0 scale: 1.7 precision goes from 0 to 2x-1 relative scale.
+	;
+	; setup:
+	;   ZR0 = (1<<21)/S0              ; 11.21 / 8.8 (S0) = 19.13, truncated to 3.13
+	;   ZR1 = (1<<21)/S1
+	;   SA = (256 * SH) / (S0 * (L1 - L0)) ; pre-combined with rotation cos/sin at 1.7
+	; per line:
+	;   zr = >lerp(ZR0,ZR1)           ; 3.5 (truncated from 3.13)
+	;   z = >((1<<11)/zr)             ; 5.11 / 3.5 = 10.6, truncated to 2.6
+	;   a = z *  cos(angle)      >> 5 ; 2.6 * 1.7 (cos>>1)    = 3.13 >> 5 = 8.8
+	;   b = z *  sin(angle) * SA >> 5 ; 2.6 * 1.7 (SA*sin>>1) = 3.13 >> 5 = 8.8
+	;   c = z * -sin(angle)      >> 5
+	;   d = z *  cos(angle) * SA >> 5
+	;
+	rep #$20
+	sep #$10
+	.a16
+	.i8
+	; calculate ZR0 = (1<<21)/S0
+	lda #((1<<21)>>16)
+	stz a:math_a+0
+	sta z:math_a+2
+	lda z:pv_s0
+	sta a:math_b+0
+	stz a:math_b+2
+	jsr udiv32
+	; result should fit in 16-bits, clamp to 0001-FFFF
+	lda a:math_p+2
+	beq :+
+		lda #$FFFF
+		sta a:math_p+0
+	:
+	lda a:math_p+0
+	bne :+
+		inc
+	:
+	sta z:pv_zr
+	; calculate ZR1 = (1<<21)/S1
+	lda z:pv_s1
+	sta a:math_b+0
+	jsr udiv32
+	lda a:math_p+2
+	beq :+
+		lda #$FFFF
+		sta a:math_p+0
+	:
+	lda a:math_p+0
+	bne :+
+		inc
+	:
+	; calculate (ZR1 - ZR0) / (L1 - L0) for interpolation increment
+	ldy #0
+	sec
+	sbc z:pv_zr
+	bcs :+
+		eor #$FFFF
+		inc
+		iny
+	: ; Y = negate
+	sta f:$004204 ; WRDIVH:WRDIVL = abs(ZR1 - ZR0)
+	sep #$20
+	.a8
+	lda z:pv_l1
+	sec
+	sbc z:pv_l0
+	sta f:$004206 ; WRDIVB = (L1 - L0), result in 12 cycles + far load
+	sta z:temp+0 ; temp+0 = L1-L0 = scanline count
+	lsr
+	inc
+	sta z:temp+1 ; temp+1 = (L1-L0 / 2)+1 = even scanline count + 1
+	rep #$20
+	.a16
+	; result is ready
+	lda f:$004214 ; RDDIVH:RDDIVL = abs(ZR1 - ZR0) / (L1 - L0)
+	asl ; x2 because we're going to calculate every 2nd scanline and interpolate
+	cpy #1
+	beq :+ ; negate if needed
+		eor #$FFFF
+		inc
+	:
+	sta z:pv_zr_inc ; per-scanline increment (x2)
+	; calculate SA
+	lda z:pv_s0
+	sta z:math_a
+	lda #0
+	ldx z:temp+0 ; L1-L0 = scanline count
+	txa
+	sta z:math_b
+	jsr umul16
+	lda z:math_p+0
+	sta z:math_b+0
+	lda z:math_p+2
+	sta z:math_b+2 ; b = S0 * (L1-L0)
+	stz z:math_a+0
+	lda z:pv_sh
+	sta z:math_a+2 ; a = (SH * 256) << 8
+	jsr udiv32
+	lda z:math_p+1
+	sta z:math_a ; SA = (SH * 256) / (S0 * (L1-L0))
+	; fetch sincos for rotation matrix
+	lda #0
+	ldx z:angle
+	txa
+	jsr sincos
+	; check for negations, take abs of cosa/sina
+	; want: cos sin -sin cos, keep track of flips to recover from abs by negating afterwards
+	ldx #0
+	lda cosa
+	bpl :+
+		eor #$FFFF
+		inc
+		sta cosa
+		ldx #%1001
+	:
+	stx z:pv_negate
+	lda sina
+	bmi :+
+		lda #%0010
+		bra :++
+	:
+		eor #$FFFF
+		inc
+		sta sina
+		lda #%0100
+	:
+	eor z:pv_negate
+	tax
+	sta z:pv_negate
+	; generate scale (convert 8.8 cosa/sina to 1.7, prescale vertical by SA)
+	lda cosa
+	sta z:math_b
+	lsr
+	tax
+	stx z:pv_scale+0 ; scale A = cos / 2
+	jsr umul16
+	lda z:math_p+1
+	cmp #$0100
+	bcc :+ ; clamp at $FF
+		lda #$00FF
+	:
+	tax
+	stx z:pv_scale+3 ; scale D = SA * cos / 2
+	lda sina
+	sta z:math_b
+	lsr
+	tax
+	stx z:pv_scale+1 ; scale B = sin / 2
+	jsr umul16
+	lda z:math_p+1
+	cmp #$0100
+	bcc :+ ; clamp at $FF
+		lda #$00FF
+	:
+	tax
+	stx z:pv_scale+2 ; scale C = SA * sin / 2
+	; generate top of buffer
+	sep #$20
+	rep #$10
+	.a8
+	.i16
+	; TODO pv_buffer_x, etc.
+	; L0 again
+	; temp+1 = even scanline count
+	; store pv_buffer_x for linear interpolation later
+	; Generate even scanlines with perspective correction
+	; ---------------------------------------------------
 	; TODO
+	; Generate odd scanlines with linear interpolation, apply negation
+	; ----------------------------------------------------------------
+	; TODO
+	sep #$20
+	rep #$10
+	.a8
+	.i16
 	; 5. set HDMA tables for next frame
+	; =================================
 	lda #$09 ; (TODO 1,2 for ABCD)
 	sta z:new_hdma_en ; enable HDMA
 	stz a:new_hdma+(0*16)+0 ; bgm: 1 byte transfer
