@@ -1189,7 +1189,6 @@ recip16f: ; A = fixed point number, result in A
 	stz z:math_b+2
 	cmp #$8000
 	bcs :+
-		stz z:temp+0
 		ldy #0
 		bra :++
 	:
