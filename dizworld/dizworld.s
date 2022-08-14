@@ -1823,23 +1823,23 @@ pv_rebuild:
 	; check for negations, take abs of cosa/sina
 	; want: cos sin -sin cos, keep track of flips to recover from abs by negating afterwards
 	ldx #0
-	lda cosa
+	lda z:cosa
 	bpl :+
 		eor #$FFFF
 		inc
-		sta cosa
+		sta z:cosa
 		ldx #%1001
 	:
 	stx z:pv_negate
-	lda sina
+	lda z:sina
 	bmi :+
-		lda #%0010
+		lda #%0100
 		bra :++
 	:
 		eor #$FFFF
 		inc
-		sta sina
-		lda #%0100
+		sta z:sina
+		lda #%0010
 	:
 	eor z:pv_negate
 	tax
@@ -2178,6 +2178,20 @@ pv_rebuild:
 pv_set_origin: ; A = scanlines above L1 to place origin (TODO currently ignored)
 	.a16
 	.i8
+	; TODO offset posx/posy by A scanlines
+	lda z:posx+2
+	sta z:nmi_m7x ; ox
+	sec
+	sbc #128
+	sta z:nmi_hofs ; ox - 128
+	lda z:posy+2
+	sta z:nmi_m7y ; oy
+	lda z:pv_l1
+	and #$00FF
+	eor #$FFFF
+	sec
+	adc z:posy+2
+	sta z:nmi_vofs ; oy - L1
 	; TODO
 	; scroll sky to meet L0 and pan with angle
 	lda z:angle
@@ -2548,30 +2562,112 @@ set_mode_y:
 	ldx #1
 	stx z:nmi_bgmode
 	jsr oam_sprite_clear
-	jsr pv_rebuild
-	jsr pv_set_origin
 mode_y:
-	; HACK down/up for L0
+	; rotate with left/right
+	ldx z:angle
 	lda z:gamepad
-	and #$0400
+	and #$0200 ; left
+	beq :+
+		ldy #$00
+		sty z:player_tile
+		inx
+	:
+	lda z:gamepad
+	and #$0100 ; right
+	beq :+
+		ldy #$04
+		sty z:player_tile
+		dex
+	:
+	stx z:angle
+	; rebuild rotation matrix
+	lda #0
+	ldx z:angle
+	txa
+	jsr sincos
+	lda z:cosa
+	sta z:nmi_m7t+0 ; A = cos
+	sta z:nmi_m7t+6 ; D = cos
+	lda z:sina
+	sta z:nmi_m7t+2 ; B = sin
+	eor #$FFFF
+	inc
+	sta z:nmi_m7t+4 ; C = -sin
+	; up/down moves player
+	lda z:gamepad
+	and #$0400 ; down
+	beq :+
+		ldy #$0C
+		sty z:player_tile
+		; X += B
+		lda z:nmi_m7t + 2 ; B
+		pha
+		clc
+		adc z:posx+1
+		sta z:posx+1
+		pla
+		jsr sign
+		adc z:posx+3
+		sta z:posx+3
+		; Y += D
+		lda z:nmi_m7t + 6 ; D
+		pha
+		clc
+		adc z:posy+1
+		sta z:posy+1
+		pla
+		jsr sign
+		adc z:posy+3
+		sta z:posy+3
+	:
+	lda z:gamepad
+	and #$0800 ; up
+	beq :+
+		ldy #$08
+		sty z:player_tile
+		; X -= B
+		lda #0
+		sec
+		sbc z:nmi_m7t + 2 ; B
+		pha
+		clc
+		adc z:posx+1
+		sta z:posx+1
+		pla
+		jsr sign
+		adc z:posx+3
+		sta z:posx+3
+		; Y -= D
+		lda #0
+		sec
+		sbc z:nmi_m7t + 6 ; D
+		pha
+		clc
+		adc z:posy+1
+		sta z:posy+1
+		pla
+		jsr sign
+		adc z:posy+3
+		sta z:posy+3
+	:
+	; HACK L/R for up/down, currently just adjusting L0
+	lda z:gamepad
+	and #$0010 ; R for up (sky goes down)
 	beq :+
 		ldx z:pv_l0
 		inx
 		cpx z:pv_l1
 		bcs :+
 		stx z:pv_l0
-		jsr pv_rebuild
-		jsr pv_set_origin
 	:
 	lda z:gamepad
-	and #$0800
+	and #$0020 ; L for down (sky goes up)
 	beq :+
 		ldx z:pv_l0
 		beq :+
 		dex
 		stx z:pv_l0
-		jsr pv_rebuild
-		jsr pv_set_origin
 	:
-	jsr simple_scroll ; TODO
+	jsr pv_set_origin
+	jsr pv_rebuild
 	rts
