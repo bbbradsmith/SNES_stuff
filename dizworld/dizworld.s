@@ -1867,7 +1867,7 @@ pv_rebuild:
 	;   ZR1 = (1<<21)/S1
 	;   SA = (256 * SH) / (S0 * (L1 - L0)) ; pre-combined with rotation cos/sin at 1.7
 	; per line:
-	;   zr = >lerp(ZR0,ZR1)           ; 3.9 (truncated from 3.13)
+	;   zr = >lerp(ZR0,ZR1)>>4        ; 3.9 (truncated from 3.13)
 	;   z = <((1<<15)/zr)             ; 1.15 / 3.9 = 10.6, clamped to 2.6
 	;   a = z *  cos(angle)      >> 5 ; 2.6 * 1.7 (cos>>1)    = 3.13 >> 5 = 8.8
 	;   b = z *  sin(angle) * SA >> 5 ; 2.6 * 1.7 (SA*sin>>1) = 3.13 >> 5 = 8.8
@@ -2121,7 +2121,7 @@ pv_rebuild:
 	and #$000F
 	sta z:temp+4 ; temp+4/5 = negate
 	@abcd_pv_line:
-		; perspective divide: lerp(zr) ; z = (1<11)/zr
+		; perspective divide: lerp(zr) ; z = (1<15)/(zr>>4)
 		; using a table wider than 8 bits instead of the hardware 16/8 divide allows a more precise result
 		lda z:pv_zr
 		lsr
