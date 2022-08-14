@@ -2066,6 +2066,12 @@ pv_rebuild:
 		dec z:temp+2
 		beq :+
 		jmp @abcd_pv_line
+		; TODO: the 5 x lsr seems really inefficient, but how else could this be done?
+		;       I could pre-adjust z or pv_scale but they'd both lose accuracy?
+		; TODO: accuracy possibility: instead of fixed scales for ZR can we somehow
+		;       remap the scale to the exact range we have?
+		; TODO: could 1/ZR be precalculated with more precision somehow? There are only 256 inputs...
+		; TODO try to interleave some of those LSRs in the nops?
 	:
 	; Generate odd scanlines with linear interpolation, apply negation
 	; ----------------------------------------------------------------
@@ -2543,7 +2549,7 @@ mode_x:
 set_mode_y:
 	.a16
 	.i8
-	; HACK
+	; TODO we could set scale these against a flying-height variable (min + (height * range * scale))
 	lda #256*2
 	sta z:pv_s0
 	lda #256/2
@@ -2650,7 +2656,7 @@ mode_y:
 		adc z:posy+3
 		sta z:posy+3
 	:
-	; HACK L/R for up/down, currently just adjusting L0
+	; HACK L/R for up/down, currently just adjusting L0, TODO implement a height variable
 	lda z:gamepad
 	and #$0010 ; R for up (sky goes down)
 	beq :+
@@ -2670,4 +2676,7 @@ mode_y:
 	:
 	jsr pv_set_origin
 	jsr pv_rebuild
-	rts
+	; TODO print stats
+	; TODO draw bird sprite and shadow
+	; TODO world to screen transform triangle demo
+	jmp print_stats
