@@ -2066,6 +2066,7 @@ pv_rebuild:
 		dec z:temp+2
 		beq :+
 		jmp @abcd_pv_line
+		; TODO: review the output of this vs. my python test and confirm they're identical
 		; TODO: the 5 x lsr seems really inefficient, but how else could this be done?
 		;       I could pre-adjust z or pv_scale but they'd both lose accuracy?
 		; TODO: accuracy possibility: instead of fixed scales for ZR can we somehow
@@ -2201,6 +2202,9 @@ pv_set_origin: ; A = scanlines above L1 to place origin (TODO currently ignored)
 	; TODO
 	; scroll sky to meet L0 and pan with angle
 	lda z:angle
+	asl
+	asl
+	eor #$FFFF
 	and #$00FF
 	sta z:nmi_bg2hofs
 	lda z:pv_l0
