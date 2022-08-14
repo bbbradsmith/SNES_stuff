@@ -105,6 +105,9 @@ nmi_m7x:      .res 2
 nmi_m7y:      .res 2
 nmi_cgwsel:   .res 1
 nmi_cgadsub:  .res 1
+nmi_bg2hofs:  .res 2
+nmi_bg2vofs:  .res 2
+nmi_tm:       .res 1
 
 new_hdma_en:  .res 1 ; HDMA channel enable at next update
 nmi_hdma_en:  .res 1 ; HDMA channel enable currently
@@ -141,6 +144,7 @@ nmi_hdma:     .res 16 * 8 ; HDMA channel settings current
 pv_hdma_ab0:  .res 1024 ; Mode 7 matrix AB
 pv_hdma_cd0:  .res 1024 ; Mode 7 matrix CD
 pv_hdma_bgm0: .res 16 ; background mode
+pv_hdma_tm0:  .res 16 ; background enable
 pv_hdma_abi0: .res 16 ; indirection for AB
 pv_hdma_cdi0: .res 16 ; indirection for CD
 pv_hdma_col0: .res 16 ; fixed colour for horizon fade (indirect)
@@ -148,6 +152,7 @@ pv_hdma_col0: .res 16 ; fixed colour for horizon fade (indirect)
 pv_hdma_ab1:  .res 1024
 pv_hdma_cd1:  .res 1024
 pv_hdma_bgm1: .res 16
+pv_hdma_tm1:  .res 16
 pv_hdma_abi1: .res 16
 pv_hdma_cdi1: .res 16
 pv_hdma_col1: .res 16
@@ -324,6 +329,16 @@ nmi:
 	sta a:$2130 ; CGWSEL
 	lda z:nmi_cgadsub
 	sta a:$2131 ; CGADSUB
+	lda z:nmi_bg2hofs+0
+	sta a:$210F ; BG2HOFS
+	lda z:nmi_bg2hofs+1
+	sta a:$210F
+	lda z:nmi_bg2vofs+0
+	sta a:$2110 ; BG2VOFS
+	lda z:nmi_bg2vofs+1
+	sta a:$2110
+	lda z:nmi_tm
+	sta a:$212C ; TM
 	; 3. OAM DMA
 	stz a:$2102
 	stz a:$2103
@@ -564,13 +579,13 @@ reset:
 	sta oam+512 ; first 4 sprites are 32x32
 	; setup PPU addresses
 	lda #((>VRAM_NMT_SKY) & $FC)
-	sta a:$2107 ; BG1SC nametable, 1-screen
-	lda #(VRAM_CHR_SKY >> 12)
+	sta a:$2108 ; BG2SC nametable, 1-screen
+	lda #(VRAM_CHR_SKY >> 12) << 4
 	sta a:$210B ; BG12NBA
 	lda #((VRAM_CHR_FG >> 13) | $20)
 	sta a:$2101 ; OBJSEL 8x8 + 32x32 sprites
 	lda #$11
-	sta a:$212C ; TM OBJ + BG1 main-screen
+	sta z:nmi_tm ; TM OBJ + BG1 main-screen
 	stz a:$212D ; TS empty sub-screen
 	; begin
 	jmp run
@@ -1558,6 +1573,11 @@ simple_rot_scale: ; LR shoulder = scale adjust, build ABCD from angle/scale
 ; Perspective View
 ;
 
+
+; indirect TM tables to swap BG1 and BG2 (both with OBJ)
+pv_tm1: .byte $11
+pv_tm2: .byte $12
+
 ; indirect COLDATA tables for fade
 pv_fade_table0: ; black for top of screen
 .byte $E0
@@ -1590,12 +1610,15 @@ pv_rebuild:
 	pha
 	plb
 	; 1. flip the double buffer
+	; =========================
 	lda z:pv_buffer
 	eor #1
 	sta z:pv_buffer
-	; 2. calculate BG mode table (pv_hdma_bgm)
+	; 2. calculate BG mode table + TM table (pv_hdma_bgm, pv_hdma_tm)
 	; ========================================
 	jsr pv_buffer_x
+	stx z:temp
+	ldy z:temp ; X = Y = pv_buffer_x
 	lda z:pv_l0
 	beq @bgm_end
 	dec ; need to set on scanline before L0
@@ -1607,14 +1630,22 @@ pv_rebuild:
 			lda #128
 		:
 		sta a:pv_hdma_bgm0+0, X
+		sta a:pv_hdma_tm0+0, Y
 		eor #$FF
 		sec
 		adc z:temp
 		sta z:temp
 		lda z:nmi_bgmode
 		sta a:pv_hdma_bgm0+1, X
+		lda #<pv_tm2
+		sta a:pv_hdma_tm0+1, Y
+		lda #>pv_tm2
+		sta a:pv_hdma_tm0+2, Y
 		inx
 		inx
+		iny
+		iny
+		iny
 		lda z:temp
 		bne @bgm_mode
 	@bgm_end:
@@ -1624,7 +1655,16 @@ pv_rebuild:
 	lda #7
 	sta a:pv_hdma_bgm0+1, X
 	stz a:pv_hdma_bgm0+2, X ; end of table
-	; 3. calculate color fade (indirect table, pv_hdma_col)
+	; set BG2 at L0
+	lda #1
+	sta a:pv_hdma_tm0+0, Y
+	lda #<pv_tm1
+	sta a:pv_hdma_tm0+1, Y
+	lda #>pv_tm1
+	sta a:pv_hdma_tm0+2, Y
+	lda #0
+	sta a:pv_hdma_tm0+3, Y ; end of table
+	; 3. calculate TM table and color fade (indirect tables: pv_hdma_tm, pv_hdma_col)
 	; =====================================================
 	jsr pv_buffer_x
 	lda z:pv_l0
@@ -1651,7 +1691,7 @@ pv_rebuild:
 		inx
 		lda z:temp+0
 		bne @col_fade
-	; 32 lines from table
+	; 32 lines from fade table
 	lda #$80 | 32
 	sta a:pv_hdma_col0+0, X
 	lda #<pv_fade_table1
@@ -1915,7 +1955,7 @@ pv_rebuild:
 		lda z:temp+2
 		bra @abcdi_body
 	@abcdi_body_end:
-	stz a:pv_hdma_abi0+0, X ; terminate table
+	stz a:pv_hdma_abi0+0, X ; end of table
 	stz a:pv_hdma_cdi0+0, X
 	; Generate even scanlines with perspective correction
 	; ---------------------------------------------------
@@ -2073,31 +2113,39 @@ pv_rebuild:
 	.i16
 	; 5. set HDMA tables for next frame
 	; =================================
-	lda #$0F
-	sta z:new_hdma_en ; enable HDMA (0,1,2,3)
+	lda #$1F
+	sta z:new_hdma_en ; enable HDMA (0,1,2,3,4)
 	stz a:new_hdma+(0*16)+0 ; bgm: 1 byte transfer
-	lda #$43
-	sta a:new_hdma+(1*16)+0 ; AB: 4 byte transfer, indirect
-	sta a:new_hdma+(2*16)+0 ; CD: 4 byte transfer, indirect
 	lda #$40
-	sta a:new_hdma+(3*16)+0 ; col: 1 byte transfer, indirect
+	sta a:new_hdma+(1*16)+0 ; tm: 1 byte transfer, indirect
+	lda #$43
+	sta a:new_hdma+(2*16)+0 ; AB: 4 byte transfer, indirect
+	sta a:new_hdma+(3*16)+0 ; CD: 4 byte transfer, indirect
+	lda #$40
+	sta a:new_hdma+(4*16)+0 ; col: 1 byte transfer, indirect
 	lda #$05
 	sta a:new_hdma+(0*16)+1 ; bgm: $2105 BGMODE
+	lda #$2C
+	sta a:new_hdma+(1*16)+1 ; tm: $212C TM
 	lda #$1B
-	sta a:new_hdma+(1*16)+1 ; AB: $211B M7A
+	sta a:new_hdma+(2*16)+1 ; AB: $211B M7A
 	lda #$1D
-	sta a:new_hdma+(2*16)+1 ; CD: $211D M7C
+	sta a:new_hdma+(3*16)+1 ; CD: $211D M7C
 	lda #$32
-	sta a:new_hdma+(3*16)+1 ; col: $3132 COLDATA
+	sta a:new_hdma+(4*16)+1 ; col: $3132 COLDATA
 	lda #$7E
 	sta a:new_hdma+(0*16)+4 ; bank
 	sta a:new_hdma+(1*16)+4
 	sta a:new_hdma+(2*16)+4
 	sta a:new_hdma+(3*16)+4
+	sta a:new_hdma+(4*16)+4
+	lda #^pv_tm1
 	sta a:new_hdma+(1*16)+7 ; indirect bank
+	lda #$7E
 	sta a:new_hdma+(2*16)+7
-	lda #^pv_fade_table0
 	sta a:new_hdma+(3*16)+7
+	lda #^pv_fade_table0
+	sta a:new_hdma+(4*16)+7
 	jsr pv_buffer_x
 	stx z:temp
 	rep #$20
@@ -2106,22 +2154,42 @@ pv_rebuild:
 	clc
 	adc z:temp
 	sta a:new_hdma+(0*16)+2
-	lda #.loword(pv_hdma_abi0)
+	lda #.loword(pv_hdma_tm0)
 	clc
 	adc z:temp
 	sta a:new_hdma+(1*16)+2
-	lda #.loword(pv_hdma_cdi0)
+	lda #.loword(pv_hdma_abi0)
 	clc
 	adc z:temp
 	sta a:new_hdma+(2*16)+2
-	lda #.loword(pv_hdma_col0)
+	lda #.loword(pv_hdma_cdi0)
 	clc
 	adc z:temp
 	sta a:new_hdma+(3*16)+2
+	lda #.loword(pv_hdma_col0)
+	clc
+	adc z:temp
+	sta a:new_hdma+(4*16)+2
 	; restore register sizes, data bank, and return
 	plb
 	plp
 	rts
+
+pv_set_origin: ; A = scanlines above L1 to place origin (TODO currently ignored)
+	.a16
+	.i8
+	; TODO
+	; scroll sky to meet L0 and pan with angle
+	lda z:angle
+	and #$00FF
+	sta z:nmi_bg2hofs
+	lda z:pv_l0
+	eor #$FFFF
+	sec
+	adc #240
+	sta z:nmi_bg2vofs
+	rts
+	
 
 ;
 ; =============================================================================
@@ -2455,11 +2523,8 @@ mode_x:
 ; Mode Y test "Flying"
 ; - Mode 1 clouds at top, fixed colour horizon fades
 ; - Map rotates around the player
+; - L/R raises/lowers view
 ;
-
-; TODO
-; set fixed color fade
-; angle rotation should adjust scrollx on mode1 map proportional to S0?
 
 set_mode_y:
 	.a16
@@ -2478,12 +2543,13 @@ set_mode_y:
 	; colormath
 	ldx #$00
 	stx z:nmi_cgwsel ; fixed colour
-	ldx #$21
-	stx z:nmi_cgadsub ; enable additive blend on BG1 + backdrop
+	ldx #$23
+	stx z:nmi_cgadsub ; enable additive blend on BG1 +BG2 + backdrop
 	ldx #1
 	stx z:nmi_bgmode
 	jsr oam_sprite_clear
 	jsr pv_rebuild
+	jsr pv_set_origin
 mode_y:
 	; HACK down/up for L0
 	lda z:gamepad
@@ -2495,6 +2561,7 @@ mode_y:
 		bcs :+
 		stx z:pv_l0
 		jsr pv_rebuild
+		jsr pv_set_origin
 	:
 	lda z:gamepad
 	and #$0800
@@ -2504,6 +2571,7 @@ mode_y:
 		dex
 		stx z:pv_l0
 		jsr pv_rebuild
+		jsr pv_set_origin
 	:
 	jsr simple_scroll ; TODO
 	rts
