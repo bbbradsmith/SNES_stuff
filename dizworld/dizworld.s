@@ -137,12 +137,14 @@ new_hdma:     .res 16 * 8 ; HDMA channel settings to apply at next update
 nmi_hdma:     .res 16 * 8 ; HDMA channel settings current
 
 ; HDMA double-buffer for perspective
+.align 256 ; (alignment not needed but is easier to debug)
 pv_hdma_ab0:  .res 1024 ; Mode 7 matrix AB
 pv_hdma_cd0:  .res 1024 ; Mode 7 matrix CD
 pv_hdma_bgm0: .res 16 ; background mode
 pv_hdma_abi0: .res 16 ; indirection for AB
 pv_hdma_cdi0: .res 16 ; indirection for CD
 pv_hdma_col0: .res 16 ; fixed colour for horizon fade (indirect)
+.align 256 ; (not needed)
 pv_hdma_ab1:  .res 1024
 pv_hdma_cd1:  .res 1024
 pv_hdma_bgm1: .res 16
@@ -587,10 +589,6 @@ run:
 	.a16
 	.i8
 	jsr oamp_start
-	; reset mode 7 transform matrix to identity (1,0) (0,1)
-	ldx #$01
-	stx z:nmi_m7t+1
-	stx z:nmi_m7t+7
 	jmp @set_mode_y
 @loop:
 	; post a render update
@@ -1912,19 +1910,106 @@ pv_rebuild:
 	lda z:temp+1
 	and #$00FF
 	sta z:temp+2 ; temp+2/3 = countdown
-	:
-		; TODO HACK just putting countdown into these for now
+	lda z:pv_negate
+	and #$000F
+	sta z:temp+4 ; temp+4/5 = negate
+	@abcd_pv_line:
+		; perspective divide: lerp(zr) ; z = (1<11)/zr
+		lda #(1<<11)
+		sta f:$004204 ; WRDIVH:WRDIVL = (1<<11)
+		lda z:pv_zr
+		xba
+		sep #$20
+		.a8
+		sta f:$004206 ; WRDIVB = zr
+		rep #$20
+		.a16
+		xba
+		clc
+		adc z:pv_zr_inc
+		sta z:pv_zr ; zr += linear interpolation increment for next line
+		lda f:$004215 ; RDDIVH:RDDIVL z = (1<<11)/zr
+		sta f:$004202 ; WRMPYA = z (spurious write to $4303)
+		; scale a
+		lda z:pv_scale+0
+		sta f:$004303 ; WRMPYB = scale a (spurious write to $4304)
+		nop
+		nop
+		lda f:$004216 ; RDMPYH:RDMPYL = z * a
+		lsr
+		lsr
+		lsr
+		lsr
+		lsr
+		lsr z:temp+4
+		bcc :+
+			eor #$FFFF
+			inc
+		:
 		sta a:pv_hdma_ab0+0, X
+		; scale b
+		lda z:pv_scale+1
+		sta f:$004303
+		nop
+		nop
+		lda f:$004216
+		lsr
+		lsr
+		lsr
+		lsr
+		lsr
+		lsr z:temp+4
+		bcc :+
+			eor #$FFFF
+			inc
+		:
 		sta a:pv_hdma_ab0+2, X
+		; scale c
+		lda z:pv_scale+2
+		sta f:$004303
+		nop
+		nop
+		lda f:$004216
+		lsr
+		lsr
+		lsr
+		lsr
+		lsr
+		lsr z:temp+4
+		bcc :+
+			eor #$FFFF
+			inc
+		:
 		sta a:pv_hdma_cd0+0, X
+		; scale d
+		lda z:pv_scale+3
+		sta f:$004303
+		nop
+		nop
+		lda f:$004216
+		lsr
+		lsr
+		lsr
+		lsr
+		lsr
+		lsr z:temp+4
+		bcc :+
+			eor #$FFFF
+			inc
+		:
 		sta a:pv_hdma_cd0+2, X
-		; ...
+		; reload negate
+		lda z:pv_negate
+		and #$000F
+		sta z:temp+4
 		txa
 		clc
 		adc #8
 		tax
 		dec z:temp+2
-		bne :-
+		beq :+
+		jmp @abcd_pv_line
+	:
 	; Generate odd scanlines with linear interpolation, apply negation
 	; ----------------------------------------------------------------
 	.a16
@@ -1937,7 +2022,6 @@ pv_rebuild:
 	beq :++
 	sta z:temp+2 ; temp+2/3 = countdown
 	:
-		; TODO should be negating as well (unless we do that in the other loop? maybe it can fill multiply time)
 		lda a:pv_hdma_ab0+ 0, X
 		clc
 		adc a:pv_hdma_ab0+ 8, X
@@ -2364,10 +2448,16 @@ set_mode_y:
 	.a16
 	.i8
 	; HACK
-	lda #64
-	sta pv_l0
-	lda #224
-	sta pv_l1
+	lda #256*4
+	sta z:pv_s0
+	lda #256/4
+	sta z:pv_s1
+	lda #(224-64)*4
+	sta z:pv_sh
+	ldx #64
+	stx z:pv_l0
+	ldx #224
+	stx z:pv_l1
 	; TODO
 	ldx #0
 	stx $2130
