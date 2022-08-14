@@ -1573,7 +1573,6 @@ simple_rot_scale: ; LR shoulder = scale adjust, build ABCD from angle/scale
 ; Perspective View
 ;
 
-
 ; indirect TM tables to swap BG1 and BG2 (both with OBJ)
 pv_tm1: .byte $11
 pv_tm2: .byte $12
@@ -2129,17 +2128,16 @@ pv_rebuild:
 		lsr
 		lsr
 		tax ; X = 12-bit zr for ztable lookup
-		lda z:pv_zr
-		clc
-		adc z:pv_zr_inc
-		sta z:pv_zr ; zr += linear interpolation increment for next line
 		lda f:pv_ztable, X
 		sta f:$004202 ; WRMPYA = z (spurious write to $4303)
 		; scale a
 		lda z:pv_scale+0
 		sta f:$004203 ; WRMPYB = scale a (spurious write to $4304)
-		nop
-		nop
+			; while waiting for the result: lerp(zr)
+			lda z:pv_zr
+			clc
+			adc z:pv_zr_inc
+			sta z:pv_zr ; zr += linear interpolation increment for next line
 		lda f:$004216 ; RDMPYH:RDMPYL = z * a
 		lsr
 		lsr
@@ -2215,9 +2213,6 @@ pv_rebuild:
 		beq :+
 		jmp @abcd_pv_line
 		; TODO this is about 1858-1880 clocks per line
-		; TODO: the 5 x lsr seems really inefficient, but how else could this be done?
-		;       I could pre-adjust z or pv_scale but they'd both lose accuracy?
-		; TODO try to interleave some of those LSRs in the nops?
 	:
 	; Generate odd scanlines with linear interpolation, apply negation
 	; ----------------------------------------------------------------
@@ -2251,7 +2246,6 @@ pv_rebuild:
 		adc a:pv_hdma_cd0+10, X
 		ror
 		sta a:pv_hdma_cd0+ 6, X
-		; ...
 		txa
 		clc
 		adc #8
