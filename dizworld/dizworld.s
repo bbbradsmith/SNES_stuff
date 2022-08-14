@@ -179,7 +179,10 @@ vector_reset:
 	sei
 	clc
 	xce ; disable 6502 emulation
-	stz $4200 ; NMI off
+	lda #0
+	phk ; K = 0
+	plb ; DB = 0
+	sta a:$004200 ; NMI off
 	jml reset
 
 ;
@@ -262,7 +265,7 @@ nmi:
 	cmp #2 ; 2 = begin blanking
 	bne :+
 		lda #$8F
-		sta $2100 ; force blanking on
+		sta a:$2100 ; force blanking on
 		stz z:nmi_hdma_en ; disable HDMA
 		stz z:nmi_ready
 		jmp @exit
@@ -284,65 +287,65 @@ nmi:
 	sta z:nmi_hdma_en
 	; 2. apply other settings
 	lda z:nmi_bgmode
-	sta $2105 ; BGMODE
+	sta a:$2105 ; BGMODE
 	lda z:nmi_hofs+0
-	sta $210D ; BG1HOFS / M7HOFS
+	sta a:$210D ; BG1HOFS / M7HOFS
 	lda z:nmi_hofs+1
-	sta $210D
+	sta a:$210D
 	lda z:nmi_vofs+0
-	sta $210E ; BG1VOFS / M7VOFS
+	sta a:$210E ; BG1VOFS / M7VOFS
 	lda z:nmi_vofs+1
-	sta $210E
+	sta a:$210E
 	lda z:nmi_m7t+0
-	sta $211B ; M7A
+	sta a:$211B ; M7A
 	lda z:nmi_m7t+1
-	sta $211B
+	sta a:$211B
 	lda z:nmi_m7t+2
-	sta $211C ; M7B
+	sta a:$211C ; M7B
 	lda z:nmi_m7t+3
-	sta $211C
+	sta a:$211C
 	lda z:nmi_m7t+4
-	sta $211D ; M7C
+	sta a:$211D ; M7C
 	lda z:nmi_m7t+5
-	sta $211D
+	sta a:$211D
 	lda z:nmi_m7t+6
-	sta $211E ; M7D
+	sta a:$211E ; M7D
 	lda z:nmi_m7t+7
-	sta $211E
+	sta a:$211E
 	lda z:nmi_m7x+0
-	sta $211F ; M7E
+	sta a:$211F ; M7E
 	lda z:nmi_m7x+1
-	sta $211F
+	sta a:$211F
 	lda z:nmi_m7y+0
-	sta $2120 ; M7F
+	sta a:$2120 ; M7F
 	lda z:nmi_m7y+1
-	sta $2120
+	sta a:$2120
 	lda z:nmi_cgwsel
-	sta $2130 ; CGWSEL
+	sta a:$2130 ; CGWSEL
 	lda z:nmi_cgadsub
-	sta $2131 ; CGADSUB
+	sta a:$2131 ; CGADSUB
 	; 3. OAM DMA
-	stz $2102
-	stz $2103
+	stz a:$2102
+	stz a:$2103
 	lda #%00000010 ; increment, 1-regiter (x2)
-	sta $4300
+	sta a:$4300
 	lda #$04 ; $2104
-	sta $4301
+	sta a:$4301
 	lda #<oam
-	sta $4302
+	sta a:$4302
 	lda #>oam
-	sta $4303
+	sta a:$4303
 	lda #^oam
-	sta $4304
+	sta a:$4304
 	lda #<(512+32)
-	sta $4305
+	sta a:$4305
 	lda #>(512+32)
-	sta $4306
+	sta a:$4306
 	lda #$01
-	sta $420B ; DMA
+	sta a:$420B ; DMA
 	; force blanking off
 	lda #$0F
-	sta $2100
+	sta a:$2100
 	stz z:nmi_ready
 	; next field
 @exit:
@@ -359,7 +362,7 @@ nmi:
 	sep #$20
 	.a8
 	lda z:nmi_hdma_en
-	sta $420C
+	sta a:$420C
 	; count frames
 	inc z:nmi_count
 	; restore registers
@@ -395,90 +398,90 @@ reset:
 	.a8
 	.i8
 	lda #$8f
-	sta $2100
-	stz $2101
-	stz $2102
-	stz $2103
-	stz $2105
-	stz $2106
-	stz $2107
-	stz $2108
-	stz $2109
-	stz $210A
-	stz $210B
-	stz $210C
-	stz $210D
-	stz $210D
-	stz $210E
-	stz $210E
-	stz $210F
-	stz $210F
-	stz $2110
-	stz $2110
-	stz $2111
-	stz $2111
-	stz $2112
-	stz $2112
-	stz $2113
-	stz $2113
-	stz $2114
-	stz $2114
+	sta a:$2100
+	stz a:$2101
+	stz a:$2102
+	stz a:$2103
+	stz a:$2105
+	stz a:$2106
+	stz a:$2107
+	stz a:$2108
+	stz a:$2109
+	stz a:$210A
+	stz a:$210B
+	stz a:$210C
+	stz a:$210D
+	stz a:$210D
+	stz a:$210E
+	stz a:$210E
+	stz a:$210F
+	stz a:$210F
+	stz a:$2110
+	stz a:$2110
+	stz a:$2111
+	stz a:$2111
+	stz a:$2112
+	stz a:$2112
+	stz a:$2113
+	stz a:$2113
+	stz a:$2114
+	stz a:$2114
 	lda #$80
-	sta $2115
-	stz $2116
-	stz $2117
-	stz $211A
-	stz $211B
+	sta a:$2115
+	stz a:$2116
+	stz a:$2117
+	stz a:$211A
+	stz a:$211B
 	lda #$01
-	sta $211B
-	stz $211C
-	stz $211C
-	stz $211D
-	stz $211D
-	stz $211E
+	sta a:$211B
+	stz a:$211C
+	stz a:$211C
+	stz a:$211D
+	stz a:$211D
+	stz a:$211E
 	lda #$01
-	sta $211E
-	stz $211F
-	stz $211F
-	stz $2120
-	stz $2120
-	stz $2121
-	stz $2123
-	stz $2124
-	stz $2125
-	stz $2126
-	stz $2127
-	stz $2128
-	stz $2129
-	stz $212A
-	stz $212B
-	stz $212C
-	stz $212D
-	stz $212E
-	stz $212F
+	sta a:$211E
+	stz a:$211F
+	stz a:$211F
+	stz a:$2120
+	stz a:$2120
+	stz a:$2121
+	stz a:$2123
+	stz a:$2124
+	stz a:$2125
+	stz a:$2126
+	stz a:$2127
+	stz a:$2128
+	stz a:$2129
+	stz a:$212A
+	stz a:$212B
+	stz a:$212C
+	stz a:$212D
+	stz a:$212E
+	stz a:$212F
 	lda #$30
-	sta $2130
-	stz $2131
+	sta a:$2130
+	stz a:$2131
 	lda #$E0
-	sta $2132
-	stz $2133
-	stz $4200
+	sta a:$2132
+	stz a:$2133
+	stz a:$4200
 	lda #$FF
-	sta $4201
-	stz $4202
-	stz $4203
-	stz $4204
-	stz $4205
-	stz $4206
-	stz $4207
-	stz $4208
-	stz $4209
-	stz $420A
-	stz $420B
-	stz $420C
-	;stz $420D ; SlowROM
+	sta a:$4201
+	stz a:$4202
+	stz a:$4203
+	stz a:$4204
+	stz a:$4205
+	stz a:$4206
+	stz a:$4207
+	stz a:$4208
+	stz a:$4209
+	stz a:$420A
+	stz a:$420B
+	stz a:$420C
+	;stz a:$420D ; SlowROM
 	lda #1
-	sta $420D ; FastROM
+	sta a:$420D ; FastROM
 	; clear RAM
 	lda #0
 	sta f:$7E0000 ; 0 byte to pattern-fill with MVN
@@ -503,47 +506,47 @@ reset:
 	stz $2116 ; VMADD $0000
 	stz $2117
 	lda #%00000001 ; 2-register
-	sta $4300
+	sta a:$4300
 	lda #$18 ; $2118 VMDATA
-	sta $4301
+	sta a:$4301
 	lda #<bin_vram
-	sta $4302
+	sta a:$4302
 	lda #>bin_vram
-	sta $4303
+	sta a:$4303
 	lda #^bin_vram
-	sta $4304
-	stz $4305
-	stz $4306 ; 64k bytes
+	sta a:$4304
+	stz a:$4305
+	stz a:$4306 ; 64k bytes
 	lda #$01
-	sta $420B ; DMA
+	sta a:$420B ; DMA
 	; load palettes
-	stz $2121 ; CGADD $00
+	stz a:$2121 ; CGADD $00
 	lda #%00000010 ; 1-register
-	sta $4300
+	sta a:$4300
 	lda #$22 ; $2122 CGDATA
-	sta $4301
+	sta a:$4301
 	lda #<pal_bg
-	sta $4302
+	sta a:$4302
 	lda #>pal_bg
-	sta $4303
+	sta a:$4303
 	lda #^pal_bg
-	sta $4304
-	stz $4305
+	sta a:$4304
+	stz a:$4305
 	lda #>256
-	sta $4306 ; 256 bytes
+	sta a:$4306 ; 256 bytes
 	lda #$01
-	sta $420B ; DMA
+	sta a:$420B ; DMA
 	lda #<pal_fg
-	sta $4302
+	sta a:$4302
 	lda #>pal_fg
-	sta $4303
+	sta a:$4303
 	lda #^pal_fg
-	sta $4304
-	stz $4305
+	sta a:$4304
+	stz a:$4305
 	lda #>256
-	sta $4306 ; 256 bytes
+	sta a:$4306 ; 256 bytes
 	lda #$01
-	sta $420B ;DMA
+	sta a:$420B ;DMA
 	; setup OAM
 	lda #$E0
 	sta a:oam+0
@@ -561,14 +564,14 @@ reset:
 	sta oam+512 ; first 4 sprites are 32x32
 	; setup PPU addresses
 	lda #((>VRAM_NMT_SKY) & $FC)
-	sta $2107 ; BG1SC nametable, 1-screen
+	sta a:$2107 ; BG1SC nametable, 1-screen
 	lda #(VRAM_CHR_SKY >> 12)
-	sta $210B ; BG12NBA
+	sta a:$210B ; BG12NBA
 	lda #((VRAM_CHR_FG >> 13) | $20)
-	sta $2101 ; OBJSEL 8x8 + 32x32 sprites
+	sta a:$2101 ; OBJSEL 8x8 + 32x32 sprites
 	lda #$11
-	sta $212C ; TM OBJ + BG1 main-screen
-	stz $212D ; TS empty sub-screen
+	sta a:$212C ; TM OBJ + BG1 main-screen
+	stz a:$212D ; TS empty sub-screen
 	; begin
 	jmp run
 
@@ -581,9 +584,9 @@ run:
 	.a8
 	.i8
 	; enable NMI and auto-joypad
-	lda $4210 ; RDNMI
+	lda a:$4210 ; RDNMI
 	lda #$81
-	sta $4200 ; NMITIMEN
+	sta a:$4200 ; NMITIMEN
 	rep #$20
 	sep #$10
 	.a16
@@ -605,10 +608,10 @@ run:
 	sta z:lastpad
 	; wait for auto-read to finish
 	:
-		lda $4212 ; HBVJOY (+RDIO)
+		lda a:$4212 ; HBVJOY (+RDIO)
 		and #1
 		bne :-
-	lda $4218 ; JOY1
+	lda a:$4218 ; JOY1
 	sta z:gamepad
 	eor z:lastpad
 	and z:gamepad
@@ -913,7 +916,7 @@ oamp_hex16_space:
 ;   inputs:  math_a, math_b, A register
 ;   outputs: math_p, math_r, A register
 ;   values are unsigned (u16), signed (s16), either (16) or fixed point (8.8)
-;   .a16 .i8 assumed
+;   .a16 .i8 DB=0 assumed
 ;
 ; umul16:         u16 a *    u16 b =  u32 p                clobbers A/X/Y
 ; smul16:         s16 a *    s16 b =   32 p,               clobbers A/X/Y
@@ -922,12 +925,12 @@ oamp_hex16_space:
 ; smul32f_16f:  s24.8 a *   s8.8 b = s8.8 A =  s8.24 p     clobbers A/X/Y,a,b
 ; smul32ft:     s24.8 a * s16.16 b = s8.8 A = s16.24 r     clobbers A/X/Y,a,b,temp0-13
 ;
-; udiv16:         u16 a /    u16 b =  u16 p    % u16 r     clobbers A/X
-; udiv32:         u32 a /    u32 b =  u32 p    % u32 r     clobbers A/X
-; recip16f:           1 /   s8.8 A = s8.8 A = s16.16 p     clobbers A/X,a,b
+; udiv16:         u16 a /    u16 b =  u16 p    % u16 r     clobbers A/X (DB any)
+; udiv32:         u32 a /    u32 b =  u32 p    % u32 r     clobbers A/X (DB any)
+; recip16f:           1 /   s8.8 A = s8.8 A = s16.16 p     clobbers A/X,a,b (DB any)
 ;
-; sign:         A = value, returns either 0 or $FFFF       preserves flags (.i8/.i16 allowed)
-; sincos:       A = angle 0-255, result in cosa/sina       clobbers A/X
+; sign:         A = value, returns either 0 or $FFFF       preserves flags (.i8/.i16 allowed, DB any)
+; sincos:       A = angle 0-255, result in cosa/sina       clobbers A/X (DB any)
 
 ; TODO time these routines and give estimates
 
@@ -938,34 +941,35 @@ umul16: ; math_a x math_b = math_p, clobbers A/X/Y
 	.a16
 	.i8
 	ldx z:math_a+0
-	stx $4202
+	stx a:$4202
 	ldy z:math_b+0
-	sty $4203         ; a0 x b0 (A)
+	sty a:$4203       ; a0 x b0 (A)
 	ldx z:math_b+1
 	stz z:math_p+2
-	lda $4216
-	stx $4203         ; a0 x b1 (B)
+	lda a:$4216
+	stx a:$4203       ; a0 x b1 (B)
 	sta z:math_p+0    ; 00AA
 	ldx z:math_a+1
-	lda $4216
-	stx $4202
-	sty $4203         ; a1 x b0 (C)
+	lda a:$4216
+	stx a:$4202
+	sty a:$4203       ; a1 x b0 (C)
 	clc
 	adc z:math_p+1    ; 00AA + 0BB0 (can't set carry because high byte was 0)
 	ldy z:math_b+1
-	adc $4216
-	sty $4203         ; a1 x b1 (D)
+	adc a:$4216
+	sty a:$4203       ; a1 x b1 (D)
 	sta z:math_p+1    ; 00AA + 0BB0 + 0CC0
 	lda z:math_p+2
 	bcc :+
 	adc #$00FF        ; if carry, increment top byte
 :
-	adc $4216
+	adc a:$4216
 	sta z:math_p+2    ; 00AA + 0BB0 + 0CC0 + DD00
 	rts
 
 ; signed 16-bit multiply, 32-bit result, clobbers A/X/Y
 smul16:
+	; DB = 0
 	.a16
 	.i8
 	jsr umul16
@@ -987,31 +991,33 @@ smul16:
 
 ; 16-bit multiply, truncated 16-bit result (sign-agnostic), clobbers A/X/Y
 mul16t:
+	; DB = 0
 	.a16
 	.i8
 	ldx z:math_a+0
-	stx $4202
+	stx a:$4202
 	ldy z:math_b+0
-	sty $4203         ; a0 x b0 (A)
+	sty a:$4203       ; a0 x b0 (A)
 	ldx z:math_b+1
 	nop
-	lda $4216
-	stx $4203         ; a0 x b1 (B)
+	lda a:$4216
+	stx a:$4203       ; a0 x b1 (B)
 	sta z:math_p+0    ; AA
 	ldx z:math_a+1
-	lda $4216
-	stx $4202
-	sty $4203         ; a1 x b0 (C)
+	lda a:$4216
+	stx a:$4202
+	sty a:$4203       ; a1 x b0 (C)
 	clc
 	adc z:math_p+1    ; AA + B0
 	clc
-	adc $4216         ; AA + B0 + C0
+	adc a:$4216       ; AA + B0 + C0
 	tax
 	stx z:math_p+1
 	lda z:math_p+0
 	rts
 
 smul16f: ; smul16 but returning the middle 16-bit value as A (i.e. 8.8 fixed point multiply)
+	; DB = 0
 	.a16
 	.i8
 	jsr smul16
@@ -1019,6 +1025,7 @@ smul16f: ; smul16 but returning the middle 16-bit value as A (i.e. 8.8 fixed poi
 	rts
 
 smul32f_16f: ; a = 24.8 fixed, b = 8.8 fixed, result in A = 8.8, clobbers: math_a/math_b
+	; DB = 0
 	.a16
 	.i8
 	lda z:math_a+0
@@ -1061,6 +1068,7 @@ smul32f_16f: ; a = 24.8 fixed, b = 8.8 fixed, result in A = 8.8, clobbers: math_
 	rts
 
 smul32ft: ; a = 24.8 fixed, b = 16.16 fixed, 16.24 result in math_r, returns 8.8 in A, clobbers math_a/b, temp0-13
+	; DB = 0
 	.a16
 	.i8
 	; sign extend and copy to temp
@@ -1115,25 +1123,25 @@ smul32ft: ; a = 24.8 fixed, b = 16.16 fixed, 16.24 result in math_r, returns 8.8
 	; 3 8x8 multiplies for the top byte
 	; A is now temporary r+4
 	ldx z:temp+0
-	stx $4202
+	stx a:$4202
 	ldx z:temp+12
-	stx $4203 ; a0 x b2 (D)
+	stx a:$4203 ; a0 x b2 (D)
 	ldx z:temp+2
 	clc
-	adc $4216      ; 0AAAA + BBB00 + CCC00 + D0000
-	stx $4202
+	adc a:$4216      ; 0AAAA + BBB00 + CCC00 + D0000
+	stx a:$4202
 	ldx z:temp+10
-	stx $4203 ; a1 x b1 (E)
+	stx a:$4203 ; a1 x b1 (E)
 	ldx z:temp+4
 	clc
-	adc $4216     ; 0AAAA + BBB00 + CCC00 + D0000 + E0000
-	stx $4202
+	adc a:$4216     ; 0AAAA + BBB00 + CCC00 + D0000 + E0000
+	stx a:$4202
 	ldx z:temp+8
-	stx $4203 ; a2 x b0 (F)
+	stx a:$4203 ; a2 x b0 (F)
 	nop
 	nop
 	clc
-	adc $4216     ; 0AAAA + BBB00 + CCC00 + D0000 + E0000 + F0000
+	adc a:$4216     ; 0AAAA + BBB00 + CCC00 + D0000 + E0000 + F0000
 	sta z:math_r+4
 	lda z:math_r+3 ; return top 16 bits
 	rts
@@ -1145,6 +1153,7 @@ smul32ft: ; a = 24.8 fixed, b = 16.16 fixed, 16.24 result in math_r, returns 8.8
 ; This could potentially be hardware-accelerated for ~2x speedup:
 ;   See: https://github.com/bbbradsmith/SNES_stuff/blob/main/multest/test_div16.s
 udiv16:
+	; DB = any
 	.a16
 	.i8
 	lda z:math_a
@@ -1168,8 +1177,8 @@ udiv16:
 ; math_a / math_b = math_p
 ; math_a % math_b = math_r
 ; clobbers A/X
-; Is there a way to do this faster with the hardware divider?
 udiv32:
+	; DB = any
 	.a16
 	.i8
 	lda z:math_a+0
@@ -1206,6 +1215,7 @@ udiv32:
 
 ; fixed point reciprocal, clobbers A/X/Y/math_a/math_b/math_p/math_r
 recip16f: ; A = fixed point number, result in A
+	; DB = any
 	sta z:math_b+0
 	stz z:math_b+2
 	cmp #$8000
@@ -1680,10 +1690,14 @@ pv_rebuild:
 	sep #$10
 	.a16
 	.i8
+	phb
+	ldy #0
+	phy
+	plb ; data bank 0 for hardware multiply/divide access
 	; calculate ZR0 = (1<<21)/S0
-	lda #((1<<21)>>16)
-	stz a:math_a+0
-	sta z:math_a+2
+	lda #(1<<21)>>16
+	stz z:math_a+0
+	sta a:math_a+2
 	lda z:pv_s0
 	sta a:math_b+0
 	stz a:math_b+2
@@ -1737,7 +1751,7 @@ pv_rebuild:
 	; result is ready
 	lda f:$004214 ; RDDIVH:RDDIVL = abs(ZR1 - ZR0) / (L1 - L0)
 	asl ; x2 because we're going to calculate every 2nd scanline and interpolate
-	cpy #1
+	cpy #0
 	beq :+ ; negate if needed
 		eor #$FFFF
 		inc
@@ -1759,7 +1773,7 @@ pv_rebuild:
 	lda z:pv_sh
 	sta z:math_a+2 ; a = (SH * 256) << 8
 	jsr udiv32
-	lda z:math_p+1
+	lda z:math_p+0
 	sta z:math_a ; SA = (SH * 256) / (S0 * (L1-L0))
 	; fetch sincos for rotation matrix
 	lda #0
@@ -1789,7 +1803,7 @@ pv_rebuild:
 	:
 	eor z:pv_negate
 	tax
-	sta z:pv_negate
+	stx z:pv_negate
 	; generate scale (convert 8.8 cosa/sina to 1.7, prescale vertical by SA)
 	lda cosa
 	sta z:math_b
@@ -1798,6 +1812,7 @@ pv_rebuild:
 	stx z:pv_scale+0 ; scale A = cos / 2
 	jsr umul16
 	lda z:math_p+1
+	lsr
 	cmp #$0100
 	bcc :+ ; clamp at $FF
 		lda #$00FF
@@ -1811,12 +1826,14 @@ pv_rebuild:
 	stx z:pv_scale+1 ; scale B = sin / 2
 	jsr umul16
 	lda z:math_p+1
+	lsr
 	cmp #$0100
 	bcc :+ ; clamp at $FF
 		lda #$00FF
 	:
 	tax
 	stx z:pv_scale+2 ; scale C = SA * sin / 2
+	plb ; return to RAM data bank
 	; generate HDMA indirection buffers
 	; ---------------------------------
 	sep #$20
@@ -1928,11 +1945,11 @@ pv_rebuild:
 		clc
 		adc z:pv_zr_inc
 		sta z:pv_zr ; zr += linear interpolation increment for next line
-		lda f:$004215 ; RDDIVH:RDDIVL z = (1<<11)/zr
+		lda f:$004214 ; RDDIVH:RDDIVL z = (1<<11)/zr
 		sta f:$004202 ; WRMPYA = z (spurious write to $4303)
 		; scale a
 		lda z:pv_scale+0
-		sta f:$004303 ; WRMPYB = scale a (spurious write to $4304)
+		sta f:$004203 ; WRMPYB = scale a (spurious write to $4304)
 		nop
 		nop
 		lda f:$004216 ; RDMPYH:RDMPYL = z * a
@@ -1949,7 +1966,7 @@ pv_rebuild:
 		sta a:pv_hdma_ab0+0, X
 		; scale b
 		lda z:pv_scale+1
-		sta f:$004303
+		sta f:$004203
 		nop
 		nop
 		lda f:$004216
@@ -1966,7 +1983,7 @@ pv_rebuild:
 		sta a:pv_hdma_ab0+2, X
 		; scale c
 		lda z:pv_scale+2
-		sta f:$004303
+		sta f:$004203
 		nop
 		nop
 		lda f:$004216
@@ -1983,7 +2000,7 @@ pv_rebuild:
 		sta a:pv_hdma_cd0+0, X
 		; scale d
 		lda z:pv_scale+3
-		sta f:$004303
+		sta f:$004203
 		nop
 		nop
 		lda f:$004216
@@ -2448,19 +2465,16 @@ set_mode_y:
 	.a16
 	.i8
 	; HACK
-	lda #256*4
+	lda #256*2
 	sta z:pv_s0
-	lda #256/4
+	lda #256/2
 	sta z:pv_s1
-	lda #(224-64)*4
+	lda #(224-64)*2
 	sta z:pv_sh
 	ldx #64
 	stx z:pv_l0
 	ldx #224
 	stx z:pv_l1
-	; TODO
-	ldx #0
-	stx $2130
 	; colormath
 	ldx #$00
 	stx z:nmi_cgwsel ; fixed colour
