@@ -2110,6 +2110,28 @@ pv_rebuild:
 	; ---------------------------------------------------
 	.a16
 	.i16
+	phb
+	sep #$10
+	.i8
+	ldx #0
+	phx
+	plb ; DB = 0 for absolute writes to hardware
+	; reuse math result ZP as long pointers
+	ldx #$7E
+	stx z:math_a+2
+	stx z:math_b+2
+	stx z:math_p+2
+	stx z:math_r+2
+	lda #.loword(pv_hdma_ab0+0)
+	sta z:math_a+0
+	lda #.loword(pv_hdma_ab0+2)
+	sta z:math_b+0
+	lda #.loword(pv_hdma_cd0+0)
+	sta z:math_p+0
+	lda #.loword(pv_hdma_cd0+2)
+	sta z:math_r+0
+	rep #$10
+	.i16
 	; temp+1 = even scanline count
 	; temp+6/7 = pv_buffer_x
 	ldy z:temp+6
@@ -2129,16 +2151,16 @@ pv_rebuild:
 		lsr
 		tax ; X = 12-bit zr for ztable lookup
 		lda f:pv_ztable, X
-		sta f:$004202 ; WRMPYA = z (spurious write to $4303)
+		sta a:$004202 ; WRMPYA = z (spurious write to $4303)
 		; scale a
 		lda z:pv_scale+0
-		sta f:$004203 ; WRMPYB = scale a (spurious write to $4304)
+		sta a:$004203 ; WRMPYB = scale a (spurious write to $4304)
 			; while waiting for the result: lerp(zr)
 			lda z:pv_zr
 			clc
 			adc z:pv_zr_inc
 			sta z:pv_zr ; zr += linear interpolation increment for next line
-		lda f:$004216 ; RDMPYH:RDMPYL = z * a
+		lda a:$004216 ; RDMPYH:RDMPYL = z * a
 		lsr
 		lsr
 		lsr
@@ -2149,13 +2171,14 @@ pv_rebuild:
 			eor #$FFFF
 			inc
 		:
-		sta a:pv_hdma_ab0+0, Y
+		sta [math_a], Y ; pv_hdma_ab0+0
 		; scale b
 		lda z:pv_scale+1
-		sta f:$004203
+		sta a:$004203
 		nop
 		nop
-		lda f:$004216
+		nop
+		lda a:$004216
 		lsr
 		lsr
 		lsr
@@ -2166,13 +2189,14 @@ pv_rebuild:
 			eor #$FFFF
 			inc
 		:
-		sta a:pv_hdma_ab0+2, Y
+		sta [math_b], Y ; pv_hdma_ab0+2
 		; scale c
 		lda z:pv_scale+2
-		sta f:$004203
+		sta a:$004203
 		nop
 		nop
-		lda f:$004216
+		nop
+		lda a:$004216
 		lsr
 		lsr
 		lsr
@@ -2183,13 +2207,14 @@ pv_rebuild:
 			eor #$FFFF
 			inc
 		:
-		sta a:pv_hdma_cd0+0, Y
+		sta [math_p], Y ; pv_hdma_cd0+0
 		; scale d
 		lda z:pv_scale+3
-		sta f:$004203
+		sta a:$004203
 		nop
 		nop
-		lda f:$004216
+		nop
+		lda a:$004216
 		lsr
 		lsr
 		lsr
@@ -2200,7 +2225,7 @@ pv_rebuild:
 			eor #$FFFF
 			inc
 		:
-		sta a:pv_hdma_cd0+2, Y
+		sta [math_r], Y ; pv_hdma_cd0+2
 		; reload negate
 		lda z:pv_negate
 		and #$000F
@@ -2214,6 +2239,7 @@ pv_rebuild:
 		jmp @abcd_pv_line
 		; TODO this is about 1858-1880 clocks per line
 	:
+	plb ; DB = $7E
 	; Generate odd scanlines with linear interpolation, apply negation
 	; ----------------------------------------------------------------
 	.a16
