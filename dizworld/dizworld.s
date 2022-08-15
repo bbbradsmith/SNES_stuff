@@ -1583,6 +1583,13 @@ simple_rot_scale: ; LR shoulder = scale adjust, build ABCD from angle/scale
 ; PV_INTERPOLATE = 4 interpolate 3/4 lines, ~0.7 scanlines per line
 PV_INTERPOLATE = 2
 
+; Allows SH to independently control vertical scale from horizontal.
+; Disabling this forces SH to be have the same texel scale vertically as S0 is horizontally,
+; which means your vertical draw distance is dependent on your horizontal view width.
+; This compromise saves ~25% of the computation, and the matched scale is generally "natural" looking.
+; Games without a DSP tended to do this (e.g. F-Zero, Final Fantasy VI).
+PV_ENABLE_SH = 0
+
 ; indirect TM tables to swap BG1 and BG2 (both with OBJ)
 pv_tm1: .byte $11
 pv_tm2: .byte $12
@@ -1868,7 +1875,8 @@ pv_rebuild:
 	;   Various shifts are applied to make the fixed point precision practical.
 	;   Acceptable ranges are set by the fixed point precision. These could be adjusted to trade precision for more/less range:
 	;   - S0/S1 should be <1024: 2.6 precision goes from 0 to 4x-1 scale
-	;   - SH scale should be less than <2x S0 scale: 1.7 precision goes from 0 to 2x-1 relative scale.
+	;   - SH scale (SA) should be less than <2x S0 scale: 1.7 precision goes from 0 to 2x-1 relative scale.
+	;     If PV_ENABLE_SH=0 then: SA=1 and pv_sh will be automatically replaced by pv_rebuild.
 	;   - L0<L1, L1<254 (L1 should probably always be 224)
 	;
 	; setup:
@@ -1981,11 +1989,17 @@ pv_rebuild:
 	lda z:math_p+2
 	sta z:math_b+2 ; b = S0 * (L1-L0)
 	stz z:math_a+0
-	lda z:pv_sh
-	sta z:math_a+2 ; a = (SH * 256) << 8
-	jsr udiv32
-	lda z:math_p+0
-	sta z:math_a ; SA = (SH * 256) / (S0 * (L1-L0))
+	.if PV_ENABLE_SH > 0
+		lda z:pv_sh
+		sta z:math_a+2 ; a = (SH * 256) << 8
+		jsr udiv32
+		lda z:math_p+0
+		sta z:math_a ; SA = (SH * 256) / (S0 * (L1-L0))
+	.else
+		; SA is automatically 1, so automatically fill SH.
+		lda z:math_b+1
+		sta z:pv_sh ; SH = (S0 * (L1-L0)) / 256
+	.endif
 	; fetch sincos for rotation matrix
 	lda #0
 	ldx z:angle
@@ -2021,28 +2035,32 @@ pv_rebuild:
 	lsr
 	tax
 	stx z:pv_scale+0 ; scale A = cos / 2
-	jsr umul16
-	lda z:math_p+1
-	lsr
-	cmp #$0100
-	bcc :+ ; clamp at $FF
-		lda #$00FF
-	:
-	tax
+	.if PV_ENABLE_SH > 0
+		jsr umul16
+		lda z:math_p+1
+		lsr
+		cmp #$0100
+		bcc :+ ; clamp at $FF
+			lda #$00FF
+		:
+		tax
+	.endif
 	stx z:pv_scale+3 ; scale D = SA * cos / 2
 	lda sina
 	sta z:math_b
 	lsr
 	tax
 	stx z:pv_scale+1 ; scale B = sin / 2
-	jsr umul16
-	lda z:math_p+1
-	lsr
-	cmp #$0100
-	bcc :+ ; clamp at $FF
-		lda #$00FF
-	:
-	tax
+	.if PV_ENABLE_SH > 0
+		jsr umul16
+		lda z:math_p+1
+		lsr
+		cmp #$0100
+		bcc :+ ; clamp at $FF
+			lda #$00FF
+		:
+		tax
+	.endif
 	stx z:pv_scale+2 ; scale C = SA * sin / 2
 	plb ; return to RAM data bank
 	; generate HDMA indirection buffers
@@ -2198,12 +2216,16 @@ pv_rebuild:
 				inc
 			:
 			sta [math_a], Y ; pv_hdma_ab0+0
+			.if PV_ENABLE_SH = 0
+				sta [math_r], Y ; pv_hdma_cd0+2 d=a
+			.endif
 		lda a:$004216
 		lsr
 		lsr
 		lsr
 		lsr
 		lsr
+	.if PV_ENABLE_SH > 0
 		; scale c
 		ldx z:pv_scale+2
 		stx a:$004203
@@ -2242,6 +2264,22 @@ pv_rebuild:
 			inc
 		:
 		sta [math_r], Y ; pv_hdma_cd0+2
+	.else ; PV_ENABLE_SH = 0
+		; if SA = 1 then b = -c
+		lsr z:temp+4
+		bcc :+
+			sta [math_p], Y ; pv_hdma_cd0+0
+			eor #$FFFF
+			inc
+			sta [math_b], Y ; pv_hdma_ab0+2
+			bra :++
+		:
+			sta [math_b], Y ; pv_hdma_ab0+2
+			eor #$FFFF
+			inc
+			sta [math_p], Y ; pv_hdma_cd0+0
+		:
+	.endif
 		; reload negate
 		lda z:pv_negate
 		and #$000F
@@ -2251,10 +2289,13 @@ pv_rebuild:
 		adc #(PV_INTERPOLATE*4)
 		tay
 		dec z:temp+2
-		;bne @abcd_pv_line ; if this was slightly shorter...!
+	.if PV_ENABLE_SH = 0
+		bne @abcd_pv_line
+	.else
 		beq :+
 		jmp @abcd_pv_line
-		; ~1670 clocks per line
+	.endif
+		; ~1670 clocks per line (~1210 if PV_ENABLE_SH=0)
 	:
 	plb ; DB = $7E
 	; Generate linear interpolation, apply negation
