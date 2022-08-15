@@ -1858,20 +1858,20 @@ pv_rebuild:
 	;   Various shifts are applied to make the fixed point precision practical.
 	;   Acceptable ranges are set by the fixed point precision. These could be adjusted to trade precision for more/less range:
 	;   - S0/S1 should be <1024: 2.6 precision goes from 0 to 4x-1 scale
-	;   - SH scale should be less than <4x S0 scale: 2.6 precision goes from 0 to 4x-1 relative scale.
+	;   - SH scale should be less than <2x S0 scale: 1.7 precision goes from 0 to 2x-1 relative scale.
 	;   - L0<L1, L1<254 (L1 should probably always be 224)
 	;
 	; setup:
 	;   ZR0 = (1<<21)/S0              ; 11.21 / 8.8 (S0) = 19.13, truncated to 3.13
 	;   ZR1 = (1<<21)/S1
-	;   SA = (256 * SH) / (S0 * (L1 - L0)) ; pre-combined with rotation cos/sin at 2.6
+	;   SA = (256 * SH) / (S0 * (L1 - L0)) ; pre-combined with rotation cos/sin at 1.7
 	; per line:
 	;   zr = >lerp(ZR0,ZR1)>>4        ; 3.9 (truncated from 3.13)
 	;   z = <((1<<15)/zr)             ; 1.15 / 3.9 = 10.6, clamped to 2.6
-	;   a = z *  cos(angle)      >> 4 ; 2.6 * 2.6 (cos>>1)    = 4.12 >> 4 = 8.8
-	;   b = z *  sin(angle) * SA >> 4 ; 2.6 * 2.6 (SA*sin>>1) = 4.12 >> 4 = 8.8
-	;   c = z * -sin(angle)      >> 4
-	;   d = z *  cos(angle) * SA >> 4
+	;   a = z *  cos(angle)      >> 5 ; 2.6 * 1.7 (cos>>1)    = 3.13 >> 5 = 8.8
+	;   b = z *  sin(angle) * SA >> 5 ; 2.6 * 1.7 (SA*sin>>1) = 3.13 >> 5 = 8.8
+	;   c = z * -sin(angle)      >> 5
+	;   d = z *  cos(angle) * SA >> 5
 	;
 	; Setup
 	; -----
@@ -1993,16 +1993,14 @@ pv_rebuild:
 	eor z:pv_negate
 	tax
 	stx z:pv_negate
-	; generate scale (convert 8.8 cosa/sina to 2.6, prescale vertical by SA)
+	; generate scale (convert 8.8 cosa/sina to 1.7, prescale vertical by SA)
 	lda cosa
 	sta z:math_b
-	lsr
 	lsr
 	tax
 	stx z:pv_scale+0 ; scale A = cos / 2
 	jsr umul16
 	lda z:math_p+1
-	lsr
 	lsr
 	cmp #$0100
 	bcc :+ ; clamp at $FF
@@ -2013,12 +2011,10 @@ pv_rebuild:
 	lda sina
 	sta z:math_b
 	lsr
-	lsr
 	tax
 	stx z:pv_scale+1 ; scale B = sin / 2
 	jsr umul16
 	lda z:math_p+1
-	lsr
 	lsr
 	cmp #$0100
 	bcc :+ ; clamp at $FF
@@ -2169,6 +2165,7 @@ pv_rebuild:
 		lsr
 		lsr
 		lsr
+		lsr
 		; scale b
 		ldx z:pv_scale+1
 		stx a:$004203
@@ -2180,6 +2177,7 @@ pv_rebuild:
 			:
 			sta [math_a], Y ; pv_hdma_ab0+0
 		lda a:$004216
+		lsr
 		lsr
 		lsr
 		lsr
@@ -2199,6 +2197,7 @@ pv_rebuild:
 		lsr
 		lsr
 		lsr
+		lsr
 		; scale d
 		ldx z:pv_scale+3
 		stx a:$004203
@@ -2210,6 +2209,7 @@ pv_rebuild:
 			:
 			sta [math_p], Y ; pv_hdma_cd0+0
 		lda a:$004216
+		lsr
 		lsr
 		lsr
 		lsr
@@ -2229,8 +2229,11 @@ pv_rebuild:
 		adc #8
 		tay
 		dec z:temp+2
-		bne @abcd_pv_line ; if this was slightly shorter...!
-	;
+		;bne @abcd_pv_line ; if this was slightly shorter...!
+		beq :+
+		jmp @abcd_pv_line
+		; TODO this is about 1858-1880 clocks per line
+	:
 	plb ; DB = $7E
 	; Generate odd scanlines with linear interpolation, apply negation
 	; ----------------------------------------------------------------
