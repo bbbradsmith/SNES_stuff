@@ -189,7 +189,7 @@ vector_reset:
 	lda #0
 	phk ; K = 0
 	plb ; DB = 0
-	sta a:$004200 ; NMI off
+	sta a:$4200 ; NMI off
 	jml reset
 
 ;
@@ -2356,16 +2356,16 @@ pv_abcd_lines_full: ; full perspective with independent horizontal/vertical scal
 	lsr
 	tax ; X = 12-bit zr for ztable lookup
 	lda f:pv_ztable, X
-	sta a:$004202 ; WRMPYA = z (spurious write to $4303)
+	sta a:$4202 ; WRMPYA = z (spurious write to $4303)
 	; scale a
 	ldx z:pv_scale+0
-	stx a:$004203 ; WRMPYB = scale a (spurious write to $4304)
+	stx a:$4203 ; WRMPYB = scale a (spurious write to $4304)
 		; while waiting for the result: lerp(zr)
 		lda z:pv_zr
 		clc
 		adc z:pv_zr_inc
 		sta z:pv_zr ; zr += linear interpolation increment for next line
-	lda a:$004216 ; RDMPYH:RDMPYL = z * a
+	lda a:$4216 ; RDMPYH:RDMPYL = z * a
 	lsr
 	lsr
 	lsr
@@ -2373,7 +2373,7 @@ pv_abcd_lines_full: ; full perspective with independent horizontal/vertical scal
 	lsr
 	; scale b
 	ldx z:pv_scale+1
-	stx a:$004203
+	stx a:$4203
 		; negate and store a while waiting
 		lsr z:temp+4
 		bcc :+
@@ -2381,7 +2381,7 @@ pv_abcd_lines_full: ; full perspective with independent horizontal/vertical scal
 			inc
 		:
 		sta [math_a], Y ; pv_hdma_ab0+0
-	lda a:$004216
+	lda a:$4216
 	lsr
 	lsr
 	lsr
@@ -2389,7 +2389,7 @@ pv_abcd_lines_full: ; full perspective with independent horizontal/vertical scal
 	lsr
 	; scale c
 	ldx z:pv_scale+2
-	stx a:$004203
+	stx a:$4203
 		; store b
 		lsr z:temp+4
 		bcc :+
@@ -2397,7 +2397,7 @@ pv_abcd_lines_full: ; full perspective with independent horizontal/vertical scal
 			inc
 		:
 		sta [math_b], Y ; pv_hdma_ab0+2
-	lda a:$004216
+	lda a:$4216
 	lsr
 	lsr
 	lsr
@@ -2405,7 +2405,7 @@ pv_abcd_lines_full: ; full perspective with independent horizontal/vertical scal
 	lsr
 	; scale d
 	ldx z:pv_scale+3
-	stx a:$004203
+	stx a:$4203
 		; store c
 		lsr z:temp+4
 		bcc :+
@@ -2413,7 +2413,7 @@ pv_abcd_lines_full: ; full perspective with independent horizontal/vertical scal
 			inc
 		:
 		sta [math_p], Y ; pv_hdma_cd0+0
-	lda a:$004216
+	lda a:$4216
 	lsr
 	lsr
 	lsr
@@ -2452,15 +2452,15 @@ pv_abcd_lines_sa1: ; SA=1 means d=a and c=-b: ~1210 clocks per line
 	lsr
 	tax
 	lda f:pv_ztable, X
-	sta a:$004202
+	sta a:$4202
 	; scale a/d
 	ldx z:pv_scale+0
-	stx a:$004203
+	stx a:$4203
 		lda z:pv_zr
 		clc
 		adc z:pv_zr_inc
 		sta z:pv_zr
-	lda a:$004216
+	lda a:$4216
 	lsr
 	lsr
 	lsr
@@ -2468,7 +2468,7 @@ pv_abcd_lines_sa1: ; SA=1 means d=a and c=-b: ~1210 clocks per line
 	lsr
 	; scale b/c
 	ldx z:pv_scale+1
-	stx a:$004203
+	stx a:$4203
 		; negate and store a while waiting
 		lsr z:temp+4
 		bcc :+
@@ -2477,7 +2477,7 @@ pv_abcd_lines_sa1: ; SA=1 means d=a and c=-b: ~1210 clocks per line
 		:
 		sta [math_a], Y ; pv_hdma_ab0+0
 		sta [math_r], Y ; pv_hdma_cd0+2 d=a
-	lda a:$004216
+	lda a:$4216
 	lsr
 	lsr
 	lsr
@@ -2520,18 +2520,18 @@ pv_abcd_lines_angle0: ; angle 0 means a/d are positive and b=c=0: ~970 clocks pe
 	lsr
 	tax
 	lda f:pv_ztable, X
-	sta a:$004202
+	sta a:$4202
 	; scale a
 	ldx z:pv_scale+0
-	stx a:$004203
+	stx a:$4203
 		lda z:pv_zr
 		clc
 		adc z:pv_zr_inc
 		sta z:pv_zr
-	lda a:$004216
+	lda a:$4216
 	; scale d
 	ldx z:pv_scale+3
-	stx a:$004203
+	stx a:$4203
 		; scale and store a while waiting
 		lsr
 		lsr
@@ -2539,7 +2539,7 @@ pv_abcd_lines_angle0: ; angle 0 means a/d are positive and b=c=0: ~970 clocks pe
 		lsr
 		lsr
 		sta [math_a], Y ; pv_hdma_ab0+0
-	lda a:$004216
+	lda a:$4216
 	lsr
 	lsr
 	lsr
