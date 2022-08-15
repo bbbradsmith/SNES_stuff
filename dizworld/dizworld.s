@@ -124,7 +124,7 @@ pv_l1:        .res 1 ; last scanline + 1
 pv_s0:        .res 2 ; horizontal texel distance at l0
 pv_s1:        .res 2 ; horizontal texel distance at l1
 pv_sh:        .res 2 ; vertical texel distance from l0 to l1, sh=0 to copy s0 scale for efficiency: (s0*(l1-l0)/256)
-pv_interp:    .res 2 ; interpolate every X lines, 0,1=1x (no interpolation, 2=2x, 4=4x, other values invalid
+pv_interp:    .res 1 ; interpolate every X lines, 0,1=1x (no interpolation, 2=2x, 4=4x, other values invalid
 ; temporaries
 pv_zr:        .res 2 ; interpolated 1/Z
 pv_zr_inc:    .res 2 ; zr increment per line
@@ -1964,8 +1964,11 @@ pv_rebuild:
 	sep #$20
 	.a8
 	lda z:pv_interp
-	bne :+
-		lda #1
+	cmp #2
+	beq :+
+	cmp #4
+	beq :+
+		lda #1 ; otherwise default to 1
 	:
 	asl
 	asl
@@ -3011,6 +3014,8 @@ set_mode_y:
 	stx z:pv_l0
 	ldx #224
 	stx z:pv_l1
+	lda #2
+	sta z:pv_interp
 	; colormath
 	ldx #$00
 	stx z:nmi_cgwsel ; fixed colour
