@@ -2153,8 +2153,8 @@ pv_rebuild:
 		lda f:pv_ztable, X
 		sta a:$004202 ; WRMPYA = z (spurious write to $4303)
 		; scale a
-		lda z:pv_scale+0
-		sta a:$004203 ; WRMPYB = scale a (spurious write to $4304)
+		ldx z:pv_scale+0
+		stx a:$004203 ; WRMPYB = scale a (spurious write to $4304)
 			; while waiting for the result: lerp(zr)
 			lda z:pv_zr
 			clc
@@ -2166,54 +2166,48 @@ pv_rebuild:
 		lsr
 		lsr
 		lsr
-		lsr z:temp+4
-		bcc :+
-			eor #$FFFF
-			inc
-		:
-		sta [math_a], Y ; pv_hdma_ab0+0
 		; scale b
-		lda z:pv_scale+1
-		sta a:$004203
-		nop
-		nop
-		nop
+		ldx z:pv_scale+1
+		stx a:$004203
+			; negate and store b while waiting
+			lsr z:temp+4
+			bcc :+
+				eor #$FFFF
+				inc
+			:
+			sta [math_a], Y ; pv_hdma_ab0+0
 		lda a:$004216
 		lsr
 		lsr
 		lsr
 		lsr
 		lsr
-		lsr z:temp+4
-		bcc :+
-			eor #$FFFF
-			inc
-		:
-		sta [math_b], Y ; pv_hdma_ab0+2
 		; scale c
-		lda z:pv_scale+2
-		sta a:$004203
-		nop
-		nop
-		nop
+		ldx z:pv_scale+2
+		stx a:$004203
+			; store b
+			lsr z:temp+4
+			bcc :+
+				eor #$FFFF
+				inc
+			:
+			sta [math_b], Y ; pv_hdma_ab0+2
 		lda a:$004216
 		lsr
 		lsr
 		lsr
 		lsr
 		lsr
-		lsr z:temp+4
-		bcc :+
-			eor #$FFFF
-			inc
-		:
-		sta [math_p], Y ; pv_hdma_cd0+0
 		; scale d
-		lda z:pv_scale+3
-		sta a:$004203
-		nop
-		nop
-		nop
+		ldx z:pv_scale+3
+		stx a:$004203
+			; store c
+			lsr z:temp+4
+			bcc :+
+				eor #$FFFF
+				inc
+			:
+			sta [math_p], Y ; pv_hdma_cd0+0
 		lda a:$004216
 		lsr
 		lsr
@@ -2235,6 +2229,7 @@ pv_rebuild:
 		adc #8
 		tay
 		dec z:temp+2
+		;bne @abcd_pv_line ; if this was slightly shorter...!
 		beq :+
 		jmp @abcd_pv_line
 		; TODO this is about 1858-1880 clocks per line
