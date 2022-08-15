@@ -1573,6 +1573,16 @@ simple_rot_scale: ; LR shoulder = scale adjust, build ABCD from angle/scale
 ; Perspective View
 ;
 
+; Interpolation calculates perspective correction on every 2nd or 4th line,
+; and linear interpolates between them to save time. 2x tends to look fine,
+; though 4x starts to amplify precision errors a little bit unpleasantly
+; (i.e. rippling across specific scanlines), especially near the bottom.
+; Options:
+; PV_INTERPOLATE = 1 no interpolation: ~1.2 scanlines per line
+; PV_INTERPOLATE = 2 interpolate odd lines, ~0.9 scanline per line
+; PV_INTERPOLATE = 4 interpolate 3/4 lines, ~0.7 scanlines per line
+PV_INTERPOLATE = 2
+
 ; indirect TM tables to swap BG1 and BG2 (both with OBJ)
 pv_tm1: .byte $11
 pv_tm2: .byte $12
@@ -1932,20 +1942,32 @@ pv_rebuild:
 	sbc z:pv_l0
 	sta f:$004206 ; WRDIVB = (L1 - L0), result in 12 cycles + far load
 	sta z:temp+0 ; temp+0 = L1-L0 = scanline count
-	lsr
+	.if PV_INTERPOLATE = 4 ; 4x
+		lsr
+		lsr
+	.elseif PV_INTERPOLATE = 2 ; 2x
+		lsr
+	.else
+		nop ; extra time to complete division
+	.endif
 	inc
-	sta z:temp+1 ; temp+1 = (L1-L0 / 2)+1 = even scanline count + 1
+	sta z:temp+1 ; temp+1 = (L1-L0 / INTERPOLATE)+1 = un-interpolated scanline count + 1
 	rep #$20
 	.a16
 	; result is ready
 	lda f:$004214 ; RDDIVH:RDDIVL = abs(ZR1 - ZR0) / (L1 - L0)
-	asl ; x2 because we're going to calculate every 2nd scanline and interpolate
+	.if PV_INTERPOLATE = 4
+		asl
+		asl
+	.elseif PV_INTERPOLATE = 2
+		asl
+	.endif
 	cpy #0
 	beq :+ ; negate if needed
 		eor #$FFFF
 		inc
 	:
-	sta z:pv_zr_inc ; per-scanline increment (x2)
+	sta z:pv_zr_inc ; per-line increment (xINTERPOLATION)
 	; calculate SA
 	lda z:pv_s0
 	sta z:math_a
@@ -2132,7 +2154,7 @@ pv_rebuild:
 	sta z:math_r+0
 	rep #$10
 	.i16
-	; temp+1 = even scanline count
+	; temp+1 =  un-interpolated scanline count
 	; temp+6/7 = pv_buffer_x
 	ldy z:temp+6
 	lda z:temp+1
@@ -2226,55 +2248,93 @@ pv_rebuild:
 		sta z:temp+4
 		tya
 		clc
-		adc #8
+		adc #(PV_INTERPOLATE*4)
 		tay
 		dec z:temp+2
 		;bne @abcd_pv_line ; if this was slightly shorter...!
 		beq :+
 		jmp @abcd_pv_line
-		; TODO this is about 1858-1880 clocks per line
+		; ~1670 clocks per line
 	:
 	plb ; DB = $7E
-	; Generate odd scanlines with linear interpolation, apply negation
+	; Generate linear interpolation, apply negation
 	; ----------------------------------------------------------------
 	.a16
 	.i16
-	ldx z:temp+6 ; pv_buffer_x
-	lda z:temp+1 ; even scanline count
-	and #$00FF
-	beq @abcd_pv_interpolate_end
-	dec ; no interpolated value after final scanline
-	beq @abcd_pv_interpolate_end
-	sta z:temp+2 ; temp+2/3 = countdown
-	@abcd_pv_interpolate:
-		lda a:pv_hdma_ab0+ 0, X
-		clc
-		adc a:pv_hdma_ab0+ 8, X
-		ror
-		sta a:pv_hdma_ab0+ 4, X
-		lda a:pv_hdma_ab0+ 2, X
-		clc
-		adc a:pv_hdma_ab0+10, X
-		ror
-		sta a:pv_hdma_ab0+ 6, X
-		lda a:pv_hdma_cd0+ 0, X
-		clc
-		adc a:pv_hdma_cd0+ 8, X
-		ror
-		sta a:pv_hdma_cd0+ 4, X
-		lda a:pv_hdma_cd0+ 2, X
-		clc
-		adc a:pv_hdma_cd0+10, X
-		ror
-		sta a:pv_hdma_cd0+ 6, X
-		txa
-		clc
-		adc #8
-		tax
-		dec z:temp+2
-		bne @abcd_pv_interpolate
-	@abcd_pv_interpolate_end:
-	; TODO this is 738-794 clocks per line
+	.if PV_INTERPOLATE > 1
+		ldx z:temp+6 ; pv_buffer_x
+		lda z:temp+1 ; un-interpolated scanline count
+		and #$00FF
+		beq @abcd_pv_interpolate_end
+		dec ; no interpolated value after final scanline
+		beq @abcd_pv_interpolate_end
+		sta z:temp+2 ; temp+2/3 = countdown
+		@abcd_pv_interpolate:
+			lda a:pv_hdma_ab0+0,                    X
+			clc
+			adc a:pv_hdma_ab0+0+(PV_INTERPOLATE*4), X
+			ror
+			sta a:pv_hdma_ab0+0+(PV_INTERPOLATE*2), X
+			lda a:pv_hdma_ab0+2,                    X
+			clc
+			adc a:pv_hdma_ab0+2+(PV_INTERPOLATE*4), X
+			ror
+			sta a:pv_hdma_ab0+2+(PV_INTERPOLATE*2), X
+			lda a:pv_hdma_cd0+0,                    X
+			clc
+			adc a:pv_hdma_cd0+0+(PV_INTERPOLATE*4), X
+			ror
+			sta a:pv_hdma_cd0+0+(PV_INTERPOLATE*2), X
+			lda a:pv_hdma_cd0+2,                    X
+			clc
+			adc a:pv_hdma_cd0+2+(PV_INTERPOLATE*4), X
+			ror
+			sta a:pv_hdma_cd0+2+(PV_INTERPOLATE*2), X
+			txa
+			clc
+			adc #(PV_INTERPOLATE*4)
+			tax
+			dec z:temp+2
+			bne @abcd_pv_interpolate
+			.if PV_INTERPOLATE = 4 ; 4x requires second pass
+				ldx z:temp+6
+				lda z:temp+1
+				and #$00FF
+				dec
+				asl ; 2x as many lines to interpolate in between the first pass
+				sta z:temp+2
+				:
+					lda a:pv_hdma_ab0+0,   X
+					clc
+					adc a:pv_hdma_ab0+0+8, X
+					ror
+					sta a:pv_hdma_ab0+0+4, X
+					lda a:pv_hdma_ab0+2,   X
+					clc
+					adc a:pv_hdma_ab0+2+8, X
+					ror
+					sta a:pv_hdma_ab0+2+4, X
+					lda a:pv_hdma_cd0+0,   X
+					clc
+					adc a:pv_hdma_cd0+0+8, X
+					ror
+					sta a:pv_hdma_cd0+0+4, X
+					lda a:pv_hdma_cd0+2,   X
+					clc
+					adc a:pv_hdma_cd0+2+8, X
+					ror
+					sta a:pv_hdma_cd0+2+4, X
+					txa
+					clc
+					adc #8
+					tax
+					dec z:temp+2
+					bne :-
+				;
+			.endif
+		@abcd_pv_interpolate_end:
+		; ~750 clocks per line
+	.endif
 	sep #$20
 	rep #$10
 	.a8
