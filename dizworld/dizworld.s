@@ -2084,7 +2084,7 @@ pv_rebuild:
 	sta z:math_b
 	lsr
 	tax
-	stx z:pv_scale+1 ; scale B = sin / 2
+	stx z:pv_scale+2 ; scale C = sin / 2
 	lda z:pv_sh
 	beq :++
 		jsr umul16
@@ -2096,7 +2096,7 @@ pv_rebuild:
 		:
 		tax
 	:
-	stx z:pv_scale+2 ; scale C = SA * sin / 2
+	stx z:pv_scale+1 ; scale B = SA * sin / 2
 	plb ; return to RAM data bank
 	; generate HDMA indirection buffers
 	; ---------------------------------
