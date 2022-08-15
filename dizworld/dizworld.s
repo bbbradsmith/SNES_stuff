@@ -121,9 +121,9 @@ oamp_y:       .res 1
 pv_buffer:    .res 1 ; 0/1 selects double buffer
 pv_l0:        .res 1 ; first scanline
 pv_l1:        .res 1 ; last scanline + 1
-pv_sh:        .res 2 ; vertical texel distance from l0 to l1
 pv_s0:        .res 2 ; horizontal texel distance at l0
 pv_s1:        .res 2 ; horizontal texel distance at l1
+pv_sh:        .res 2 ; vertical texel distance from l0 to l1, sh=0 to copy s0 scale for efficiency: (s0*(l1-l0)/256)
 ; temporaries
 pv_zr:        .res 2 ; interpolated 1/Z
 pv_zr_inc:    .res 2 ; zr increment per line
@@ -1578,17 +1578,10 @@ simple_rot_scale: ; LR shoulder = scale adjust, build ABCD from angle/scale
 ; though 4x starts to amplify precision errors a little bit unpleasantly
 ; (i.e. rippling across specific scanlines), especially near the bottom.
 ; Options:
-; PV_INTERPOLATE = 1 no interpolation: ~1.2 scanlines per line
-; PV_INTERPOLATE = 2 interpolate odd lines, ~0.9 scanline per line
-; PV_INTERPOLATE = 4 interpolate 3/4 lines, ~0.7 scanlines per line
+; PV_INTERPOLATE = 1 no interpolation: ~1.2 scanlines per line (~0.9 if sh=0, ~0.7 if angle=0)
+; PV_INTERPOLATE = 2 interpolate odd lines, ~0.9 scanline per line (~0.7 if sh=0, ~0.6 if angle=0)
+; PV_INTERPOLATE = 4 interpolate 3/4 lines, ~0.7 scanlines per line (~0.6 if sh=0, ~0.6 if angle=0)
 PV_INTERPOLATE = 2
-
-; Allows SH to independently control vertical scale from horizontal.
-; Disabling this forces SH to be have the same texel scale vertically as S0 is horizontally,
-; which means your vertical draw distance is dependent on your horizontal view width.
-; This compromise saves ~25% of the computation, and the matched scale is generally "natural" looking.
-; Games without a DSP tended to do this (e.g. F-Zero, Final Fantasy VI).
-PV_ENABLE_SH = 0
 
 ; indirect TM tables to swap BG1 and BG2 (both with OBJ)
 pv_tm1: .byte $11
@@ -1876,7 +1869,8 @@ pv_rebuild:
 	;   Acceptable ranges are set by the fixed point precision. These could be adjusted to trade precision for more/less range:
 	;   - S0/S1 should be <1024: 2.6 precision goes from 0 to 4x-1 scale
 	;   - SH scale (SA) should be less than <2x S0 scale: 1.7 precision goes from 0 to 2x-1 relative scale.
-	;     If PV_ENABLE_SH=0 then: SA=1 and pv_sh will be automatically replaced by pv_rebuild.
+	;     If SH=0 then SA will be forced to 1, allowing more efficient computation but SH will automatically have the same texel scale as S0.
+	;     Many games without DSP did SA=1 like this (e.g. F-Zero, Final Fantasy VI), trading independent vertical scale away for faster computation.
 	;   - L0<L1, L1<254 (L1 should probably always be 224)
 	;
 	; setup:
@@ -1989,17 +1983,16 @@ pv_rebuild:
 	lda z:math_p+2
 	sta z:math_b+2 ; b = S0 * (L1-L0)
 	stz z:math_a+0
-	.if PV_ENABLE_SH > 0
-		lda z:pv_sh
+	lda z:pv_sh
+	beq :+
 		sta z:math_a+2 ; a = (SH * 256) << 8
 		jsr udiv32
 		lda z:math_p+0
-		sta z:math_a ; SA = (SH * 256) / (S0 * (L1-L0))
-	.else
-		; SA is automatically 1, so automatically fill SH.
-		lda z:math_b+1
-		sta z:pv_sh ; SH = (S0 * (L1-L0)) / 256
-	.endif
+		bra :++
+	:
+		lda #1<<8 ; SA = 1
+	:
+	sta z:math_a ; SA = (SH * 256) / (S0 * (L1-L0))
 	; fetch sincos for rotation matrix
 	lda #0
 	ldx z:angle
@@ -2035,7 +2028,8 @@ pv_rebuild:
 	lsr
 	tax
 	stx z:pv_scale+0 ; scale A = cos / 2
-	.if PV_ENABLE_SH > 0
+	lda z:pv_sh
+	beq :++
 		jsr umul16
 		lda z:math_p+1
 		lsr
@@ -2044,14 +2038,15 @@ pv_rebuild:
 			lda #$00FF
 		:
 		tax
-	.endif
+	:
 	stx z:pv_scale+3 ; scale D = SA * cos / 2
 	lda sina
 	sta z:math_b
 	lsr
 	tax
 	stx z:pv_scale+1 ; scale B = sin / 2
-	.if PV_ENABLE_SH > 0
+	lda z:pv_sh
+	beq :++
 		jsr umul16
 		lda z:math_p+1
 		lsr
@@ -2060,7 +2055,7 @@ pv_rebuild:
 			lda #$00FF
 		:
 		tax
-	.endif
+	:
 	stx z:pv_scale+2 ; scale C = SA * sin / 2
 	plb ; return to RAM data bank
 	; generate HDMA indirection buffers
@@ -2146,7 +2141,7 @@ pv_rebuild:
 	@abcdi_body_end:
 	stz a:pv_hdma_abi0+0, X ; end of table
 	stz a:pv_hdma_cdi0+0, X
-	; Generate even scanlines with perspective correction
+	; Generate scanlines with perspective correction
 	; ---------------------------------------------------
 	.a16
 	.i16
@@ -2181,121 +2176,34 @@ pv_rebuild:
 	lda z:pv_negate
 	and #$000F
 	sta z:temp+4 ; temp+4/5 = negate
-	@abcd_pv_line:
-		; perspective divide: lerp(zr) ; z = (1<15)/(zr>>4)
-		; using a table wider than 8 bits instead of the hardware 16/8 divide allows a more precise result
-		lda z:pv_zr
-		lsr
-		lsr
-		lsr
-		lsr
-		tax ; X = 12-bit zr for ztable lookup
-		lda f:pv_ztable, X
-		sta a:$004202 ; WRMPYA = z (spurious write to $4303)
-		; scale a
-		ldx z:pv_scale+0
-		stx a:$004203 ; WRMPYB = scale a (spurious write to $4304)
-			; while waiting for the result: lerp(zr)
-			lda z:pv_zr
-			clc
-			adc z:pv_zr_inc
-			sta z:pv_zr ; zr += linear interpolation increment for next line
-		lda a:$004216 ; RDMPYH:RDMPYL = z * a
-		lsr
-		lsr
-		lsr
-		lsr
-		lsr
-		; scale b
-		ldx z:pv_scale+1
-		stx a:$004203
-			; negate and store a while waiting
-			lsr z:temp+4
-			bcc :+
-				eor #$FFFF
-				inc
-			:
-			sta [math_a], Y ; pv_hdma_ab0+0
-			.if PV_ENABLE_SH = 0
-				sta [math_r], Y ; pv_hdma_cd0+2 d=a
-			.endif
-		lda a:$004216
-		lsr
-		lsr
-		lsr
-		lsr
-		lsr
-	.if PV_ENABLE_SH > 0
-		; scale c
-		ldx z:pv_scale+2
-		stx a:$004203
-			; store b
-			lsr z:temp+4
-			bcc :+
-				eor #$FFFF
-				inc
-			:
-			sta [math_b], Y ; pv_hdma_ab0+2
-		lda a:$004216
-		lsr
-		lsr
-		lsr
-		lsr
-		lsr
-		; scale d
-		ldx z:pv_scale+3
-		stx a:$004203
-			; store c
-			lsr z:temp+4
-			bcc :+
-				eor #$FFFF
-				inc
-			:
-			sta [math_p], Y ; pv_hdma_cd0+0
-		lda a:$004216
-		lsr
-		lsr
-		lsr
-		lsr
-		lsr
-		lsr z:temp+4
-		bcc :+
-			eor #$FFFF
-			inc
-		:
-		sta [math_r], Y ; pv_hdma_cd0+2
-	.else ; PV_ENABLE_SH = 0
-		; if SA = 1 then b = -c
-		lsr z:temp+4
-		bcc :+
-			sta [math_p], Y ; pv_hdma_cd0+0
-			eor #$FFFF
-			inc
-			sta [math_b], Y ; pv_hdma_ab0+2
-			bra :++
-		:
-			sta [math_b], Y ; pv_hdma_ab0+2
-			eor #$FFFF
-			inc
-			sta [math_p], Y ; pv_hdma_cd0+0
-		:
-	.endif
-		; reload negate
+	; choose 1 of 3 variations:
+	ldx z:pv_scale+1
+	bne :+
 		lda z:pv_negate
-		and #$000F
-		sta z:temp+4
-		tya
-		clc
-		adc #(PV_INTERPOLATE*4)
-		tay
-		dec z:temp+2
-	.if PV_ENABLE_SH = 0
-		bne @abcd_pv_line
-	.else
-		beq :+
-		jmp @abcd_pv_line
-	.endif
-		; ~1670 clocks per line (~1210 if PV_ENABLE_SH=0)
+		and #%1001
+		bne :+
+		; if b=0 (assume c=0) angle is either 0, 180
+		; if a/d are not negated, angle=0
+		jsr pv_abcd_lines_angle0 ; only calculates a/d, fills 
+		bra :+++
+	:
+	sep #$20
+	.a8
+	txa
+	cmp z:pv_scale+2
+	bne :+
+		lda z:pv_scale+0
+		cmp z:pv_scale+3
+		bne :+
+		; if b==c and a==d then SA=1
+		rep #$20
+		.a16
+		jsr pv_abcd_lines_sa1
+		bra :++
+	:
+		rep #$20
+		.a16
+		jsr pv_abcd_lines_full
 	:
 	plb ; DB = $7E
 	; Generate linear interpolation, apply negation
@@ -2442,6 +2350,210 @@ pv_rebuild:
 	; restore register sizes, data bank, and return
 	plb
 	plp
+	rts
+
+pv_abcd_lines_full: ; full perspective with independent horizontal/vertical scale: ~1670 clocks per line
+	; perspective divide: lerp(zr) ; z = (1<15)/(zr>>4)
+	; using a table wider than 8 bits instead of the hardware 16/8 divide allows a more precise result
+	lda z:pv_zr
+	lsr
+	lsr
+	lsr
+	lsr
+	tax ; X = 12-bit zr for ztable lookup
+	lda f:pv_ztable, X
+	sta a:$004202 ; WRMPYA = z (spurious write to $4303)
+	; scale a
+	ldx z:pv_scale+0
+	stx a:$004203 ; WRMPYB = scale a (spurious write to $4304)
+		; while waiting for the result: lerp(zr)
+		lda z:pv_zr
+		clc
+		adc z:pv_zr_inc
+		sta z:pv_zr ; zr += linear interpolation increment for next line
+	lda a:$004216 ; RDMPYH:RDMPYL = z * a
+	lsr
+	lsr
+	lsr
+	lsr
+	lsr
+	; scale b
+	ldx z:pv_scale+1
+	stx a:$004203
+		; negate and store a while waiting
+		lsr z:temp+4
+		bcc :+
+			eor #$FFFF
+			inc
+		:
+		sta [math_a], Y ; pv_hdma_ab0+0
+	lda a:$004216
+	lsr
+	lsr
+	lsr
+	lsr
+	lsr
+	; scale c
+	ldx z:pv_scale+2
+	stx a:$004203
+		; store b
+		lsr z:temp+4
+		bcc :+
+			eor #$FFFF
+			inc
+		:
+		sta [math_b], Y ; pv_hdma_ab0+2
+	lda a:$004216
+	lsr
+	lsr
+	lsr
+	lsr
+	lsr
+	; scale d
+	ldx z:pv_scale+3
+	stx a:$004203
+		; store c
+		lsr z:temp+4
+		bcc :+
+			eor #$FFFF
+			inc
+		:
+		sta [math_p], Y ; pv_hdma_cd0+0
+	lda a:$004216
+	lsr
+	lsr
+	lsr
+	lsr
+	lsr
+	lsr z:temp+4
+	bcc :+
+		eor #$FFFF
+		inc
+	:
+	sta [math_r], Y ; pv_hdma_cd0+2
+	; reload negate and do next
+	lda z:pv_negate
+	and #$000F
+	sta z:temp+4
+	tya
+	clc
+	adc #(PV_INTERPOLATE*4)
+	tay
+	dec z:temp+2
+	beq :+
+	jmp pv_abcd_lines_full
+:
+	rts
+
+pv_abcd_lines_sa1: ; SA=1 means d=a and c=-b: ~1210 clocks per line
+	lda z:pv_zr
+	lsr
+	lsr
+	lsr
+	lsr
+	tax
+	lda f:pv_ztable, X
+	sta a:$004202
+	; scale a/d
+	ldx z:pv_scale+0
+	stx a:$004203
+		lda z:pv_zr
+		clc
+		adc z:pv_zr_inc
+		sta z:pv_zr
+	lda a:$004216
+	lsr
+	lsr
+	lsr
+	lsr
+	lsr
+	; scale b/c
+	ldx z:pv_scale+1
+	stx a:$004203
+		; negate and store a while waiting
+		lsr z:temp+4
+		bcc :+
+			eor #$FFFF
+			inc
+		:
+		sta [math_a], Y ; pv_hdma_ab0+0
+		sta [math_r], Y ; pv_hdma_cd0+2 d=a
+	lda a:$004216
+	lsr
+	lsr
+	lsr
+	lsr
+	lsr
+	lsr z:temp+4
+	bcc :+
+		sta [math_p], Y ; pv_hdma_cd0+0
+		eor #$FFFF
+		inc
+		sta [math_b], Y ; pv_hdma_ab0+2 b=-c
+		bra :++
+	:
+		sta [math_b], Y ; pv_hdma_ab0+2
+		eor #$FFFF
+		inc
+		sta [math_p], Y ; pv_hdma_cd0+0 c=-b
+	:
+	; next
+	lda z:pv_negate
+	and #$000F
+	sta z:temp+4
+	tya
+	clc
+	adc #(PV_INTERPOLATE*4)
+	tay
+	dec z:temp+2
+	bne pv_abcd_lines_sa1
+	rts
+
+pv_abcd_lines_angle0: ; angle 0 means a/d are positive and b=c=0: ~970 clocks per line
+	lda z:pv_zr
+	lsr
+	lsr
+	lsr
+	lsr
+	tax
+	lda f:pv_ztable, X
+	sta a:$004202
+	; scale a
+	ldx z:pv_scale+0
+	stx a:$004203
+		lda z:pv_zr
+		clc
+		adc z:pv_zr_inc
+		sta z:pv_zr
+	lda a:$004216
+	; scale d
+	ldx z:pv_scale+3
+	stx a:$004203
+		; scale and store a while waiting
+		lsr
+		lsr
+		lsr
+		lsr
+		lsr
+		sta [math_a], Y ; pv_hdma_ab0+0
+	lda a:$004216
+	lsr
+	lsr
+	lsr
+	lsr
+	lsr
+	sta [math_r], Y ; pv_hdma_cd0+2
+	; b/c = 0
+	lda #0
+	sta [math_b], Y
+	sta [math_p], Y
+	; next
+	tya
+	clc
+	adc #(PV_INTERPOLATE*4)
+	tay
+	dec z:temp+2
+	bne pv_abcd_lines_angle0
 	rts
 
 pv_set_origin: ; A = scanlines above L1 to place origin (TODO currently ignored)
