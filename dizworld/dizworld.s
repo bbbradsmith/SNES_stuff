@@ -1604,9 +1604,9 @@ simple_rot_scale: ; LR shoulder = scale adjust, build ABCD from angle/scale
 ;
 ; With sh=0, it will behave as if sh = (s0 * (l1-l0)) / 256
 ; This means if s0 has N texels per pixel horizontally, sh will have N texels per pixel vertically.
-; The resulting view usually has a fairly natural looking scale, and many games without DSP
-; (e.g. F-Zero, Final Fantasy VI) accepted this compromise, trading independent vertical scale
-; away for faster computation.
+; The resulting view usually has a fairly natural looking scal. A square appears square, locally speaking.
+; Many games without DSP (e.g. F-Zero, Final Fantasy VI) accepted this compromise,
+; trading independent vertical scale away for faster computation.
 
 ; indirect TM tables to swap BG1 and BG2 (both with OBJ)
 pv_tm1: .byte $11
@@ -2656,7 +2656,7 @@ pv_set_origin: ; A = scanlines above L1 to place origin (TODO currently ignored)
 	asl
 	asl
 	eor #$FFFF
-	and #$00FF
+	and #$03FF
 	sta z:nmi_bg2hofs
 	lda z:pv_l0
 	eor #$FFFF
