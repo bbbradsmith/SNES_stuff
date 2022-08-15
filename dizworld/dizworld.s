@@ -124,11 +124,13 @@ pv_l1:        .res 1 ; last scanline + 1
 pv_s0:        .res 2 ; horizontal texel distance at l0
 pv_s1:        .res 2 ; horizontal texel distance at l1
 pv_sh:        .res 2 ; vertical texel distance from l0 to l1, sh=0 to copy s0 scale for efficiency: (s0*(l1-l0)/256)
+pv_interp:    .res 2 ; interpolate every X lines, 0,1=1x (no interpolation, 2=2x, 4=4x, other values invalid
 ; temporaries
 pv_zr:        .res 2 ; interpolated 1/Z
 pv_zr_inc:    .res 2 ; zr increment per line
 pv_scale:     .res 4 ; 8-bit scale of a/b/c/d
 pv_negate:    .res 1 ; negation of a/b/c/d
+pv_interps:   .res 2 ; interpolate * 4 for stride increment
 
 .segment "LORAM" ; <$2000
 
@@ -794,6 +796,19 @@ oam_sprite: ; A = tile, X = OAM start index (x4), screenx,screeny location
 ; =============================================================================
 ; OAM printing
 ;
+
+; summary:
+;  .a16/.i8 assumed for most functions
+;
+;  oamp_start - begin printing
+;  oamp_finish - finish printing
+;  oamp_return - carriage return
+;  oamp_space - space
+;  oamp_alpha ; A = ascii capital letter to print (a/i any)
+;  oamp_alpha_space ; alpha + space
+;  oamp_hex8 ; A = value to print in hex (a/i any)
+;  oamp_hex16 ; A = 16-bit value to print in hex
+;  oamp_hex16_space
 
 OAMP_X = 24 ; starting position for OAM printing
 OAMP_Y = 168
@@ -1573,15 +1588,25 @@ simple_rot_scale: ; LR shoulder = scale adjust, build ABCD from angle/scale
 ; Perspective View
 ;
 
-; Interpolation calculates perspective correction on every 2nd or 4th line,
-; and linear interpolates between them to save time. 2x tends to look fine,
+; Configuration and performance:
+;   There are 3 versions of the perspective generator which take increasing CPU time:
+;     1. angle=0:  No rotation of the view.
+;     2. pv_sh=0:  Vertical view scale is locked to horizontal view scale.
+;     3. pv_sh!=0: Full calculation, vertical view scale is independent of horizontal.
+;   Interpolation can be applied on every 2nd, or 3 of 4 lines:
+;     1. pv_interp=0/1: no interpolation:      ~1.2 scanlines per line, ~0.9 if sh=0, ~0.7 if angle=0
+;     2. pv_interp=2:   interpolate odd lines, ~0.9 scanlines per line, ~0.7 if sh=0, ~0.6 if angle=0
+;     3. pv_interp=4:   interpolate 3/4 lines, ~0.7 scanlines per line, ~0.6 if sh=0, ~0.6 if angle=0
+;
+; Interpolation can be used to reduce CPU time. 2x tends to look fine,
 ; though 4x starts to amplify precision errors a little bit unpleasantly
 ; (i.e. rippling across specific scanlines), especially near the bottom.
-; Options:
-; PV_INTERPOLATE = 1 no interpolation: ~1.2 scanlines per line (~0.9 if sh=0, ~0.7 if angle=0)
-; PV_INTERPOLATE = 2 interpolate odd lines, ~0.9 scanline per line (~0.7 if sh=0, ~0.6 if angle=0)
-; PV_INTERPOLATE = 4 interpolate 3/4 lines, ~0.7 scanlines per line (~0.6 if sh=0, ~0.6 if angle=0)
-PV_INTERPOLATE = 2
+;
+; With sh=0, it will behave as if sh = (s0 * (l1-l0)) / 256
+; This means if s0 has N texels per pixel horizontally, sh will have N texels per pixel vertically.
+; The resulting view usually has a fairly natural looking scale, and many games without DSP
+; (e.g. F-Zero, Final Fantasy VI) accepted this compromise, trading independent vertical scale
+; away for faster computation.
 
 ; indirect TM tables to swap BG1 and BG2 (both with OBJ)
 pv_tm1: .byte $11
@@ -1870,7 +1895,6 @@ pv_rebuild:
 	;   - S0/S1 should be <1024: 2.6 precision goes from 0 to 4x-1 scale
 	;   - SH scale (SA) should be less than <2x S0 scale: 1.7 precision goes from 0 to 2x-1 relative scale.
 	;     If SH=0 then SA will be forced to 1, allowing more efficient computation but SH will automatically have the same texel scale as S0.
-	;     Many games without DSP did SA=1 like this (e.g. F-Zero, Final Fantasy VI), trading independent vertical scale away for faster computation.
 	;   - L0<L1, L1<254 (L1 should probably always be 224)
 	;
 	; setup:
@@ -1939,37 +1963,53 @@ pv_rebuild:
 	sta f:$004204 ; WRDIVH:WRDIVL = abs(ZR1 - ZR0)
 	sep #$20
 	.a8
+	lda z:pv_interp
+	bne :+
+		lda #1
+	:
+	asl
+	asl
+	sta z:pv_interps+0 ; interps = interp * 4 (stride for increment)
+	stz z:pv_interps+1 ; high byte zero for use with 16-bit registers
 	lda z:pv_l1
 	sec
 	sbc z:pv_l0
 	sta f:$004206 ; WRDIVB = (L1 - L0), result in 12 cycles + far load
 	sta z:temp+0 ; temp+0 = L1-L0 = scanline count
-	.if PV_INTERPOLATE = 4 ; 4x
+	ldx z:pv_interp
+	cpx #4
+	bne :+
 		lsr
 		lsr
-	.elseif PV_INTERPOLATE = 2 ; 2x
+		bra :++
+	:
+	cpx #2
+	bne :+
 		lsr
-	.else
-		nop ; extra time to complete division
-	.endif
+	:
 	inc
 	sta z:temp+1 ; temp+1 = (L1-L0 / INTERPOLATE)+1 = un-interpolated scanline count + 1
 	rep #$20
 	.a16
 	; result is ready
 	lda f:$004214 ; RDDIVH:RDDIVL = abs(ZR1 - ZR0) / (L1 - L0)
-	.if PV_INTERPOLATE = 4
+	ldx z:pv_interp
+	cpx #4
+	bne :+
 		asl
 		asl
-	.elseif PV_INTERPOLATE = 2
+		bra :++
+	:
+	cpx #2
+	bne :+
 		asl
-	.endif
+	:
 	cpy #0
 	beq :+ ; negate if needed
 		eor #$FFFF
 		inc
 	:
-	sta z:pv_zr_inc ; per-line increment (xINTERPOLATION)
+	sta z:pv_zr_inc ; per-line increment * interpolation factor
 	; calculate SA
 	lda z:pv_s0
 	sta z:math_a
@@ -1990,7 +2030,7 @@ pv_rebuild:
 		lda z:math_p+0
 		bra :++
 	:
-		lda #1<<8 ; SA = 1
+		lda #1<<8 ; SH = 0 means: SA = 1
 	:
 	sta z:math_a ; SA = (SH * 256) / (S0 * (L1-L0))
 	; fetch sincos for rotation matrix
@@ -2208,82 +2248,28 @@ pv_rebuild:
 	plb ; DB = $7E
 	; Generate linear interpolation, apply negation
 	; ----------------------------------------------------------------
+	; ~750 clocks per line
 	.a16
 	.i16
-	.if PV_INTERPOLATE > 1
+	lda z:pv_interps
+	cmp #(2*4)
+	bcc @interpolate_end
 		ldx z:temp+6 ; pv_buffer_x
 		lda z:temp+1 ; un-interpolated scanline count
-		and #$00FF
-		beq @abcd_pv_interpolate_end
-		dec ; no interpolated value after final scanline
-		beq @abcd_pv_interpolate_end
+		and #$0FF
+		beq @interpolate_end
+		dec
+		beq @interpolate_end
 		sta z:temp+2 ; temp+2/3 = countdown
-		@abcd_pv_interpolate:
-			lda a:pv_hdma_ab0+0,                    X
-			clc
-			adc a:pv_hdma_ab0+0+(PV_INTERPOLATE*4), X
-			ror
-			sta a:pv_hdma_ab0+0+(PV_INTERPOLATE*2), X
-			lda a:pv_hdma_ab0+2,                    X
-			clc
-			adc a:pv_hdma_ab0+2+(PV_INTERPOLATE*4), X
-			ror
-			sta a:pv_hdma_ab0+2+(PV_INTERPOLATE*2), X
-			lda a:pv_hdma_cd0+0,                    X
-			clc
-			adc a:pv_hdma_cd0+0+(PV_INTERPOLATE*4), X
-			ror
-			sta a:pv_hdma_cd0+0+(PV_INTERPOLATE*2), X
-			lda a:pv_hdma_cd0+2,                    X
-			clc
-			adc a:pv_hdma_cd0+2+(PV_INTERPOLATE*4), X
-			ror
-			sta a:pv_hdma_cd0+2+(PV_INTERPOLATE*2), X
-			txa
-			clc
-			adc #(PV_INTERPOLATE*4)
-			tax
-			dec z:temp+2
-			bne @abcd_pv_interpolate
-			.if PV_INTERPOLATE = 4 ; 4x requires second pass
-				ldx z:temp+6
-				lda z:temp+1
-				and #$00FF
-				dec
-				asl ; 2x as many lines to interpolate in between the first pass
-				sta z:temp+2
-				:
-					lda a:pv_hdma_ab0+0,   X
-					clc
-					adc a:pv_hdma_ab0+0+8, X
-					ror
-					sta a:pv_hdma_ab0+0+4, X
-					lda a:pv_hdma_ab0+2,   X
-					clc
-					adc a:pv_hdma_ab0+2+8, X
-					ror
-					sta a:pv_hdma_ab0+2+4, X
-					lda a:pv_hdma_cd0+0,   X
-					clc
-					adc a:pv_hdma_cd0+0+8, X
-					ror
-					sta a:pv_hdma_cd0+0+4, X
-					lda a:pv_hdma_cd0+2,   X
-					clc
-					adc a:pv_hdma_cd0+2+8, X
-					ror
-					sta a:pv_hdma_cd0+2+4, X
-					txa
-					clc
-					adc #8
-					tax
-					dec z:temp+2
-					bne :-
-				;
-			.endif
-		@abcd_pv_interpolate_end:
-		; ~750 clocks per line
-	.endif
+		lda z:pv_interps
+		cmp #(4*4)
+		beq :+
+			jsr pv_interpolate_2x
+			bra :++
+		:
+			jsr pv_interpolate_4x
+		:
+	@interpolate_end:
 	sep #$20
 	rep #$10
 	.a8
@@ -2353,6 +2339,11 @@ pv_rebuild:
 	rts
 
 pv_abcd_lines_full: ; full perspective with independent horizontal/vertical scale: ~1670 clocks per line
+	; temp+2/3 = un-interpolated scanline count
+	; temp+4/5 = pv_negate
+	; Y = pv_buffer_x
+	.a16
+	.i16
 	; perspective divide: lerp(zr) ; z = (1<15)/(zr>>4)
 	; using a table wider than 8 bits instead of the hardware 16/8 divide allows a more precise result
 	lda z:pv_zr
@@ -2437,7 +2428,7 @@ pv_abcd_lines_full: ; full perspective with independent horizontal/vertical scal
 	sta z:temp+4
 	tya
 	clc
-	adc #(PV_INTERPOLATE*4)
+	adc z:pv_interps
 	tay
 	dec z:temp+2
 	beq :+
@@ -2446,6 +2437,11 @@ pv_abcd_lines_full: ; full perspective with independent horizontal/vertical scal
 	rts
 
 pv_abcd_lines_sa1: ; SA=1 means d=a and c=-b: ~1210 clocks per line
+	; temp+2/3 = un-interpolated scanline count
+	; temp+4/5 = pv_negate
+	; Y = pv_buffer_x
+	.a16
+	.i16
 	lda z:pv_zr
 	lsr
 	lsr
@@ -2503,13 +2499,17 @@ pv_abcd_lines_sa1: ; SA=1 means d=a and c=-b: ~1210 clocks per line
 	sta z:temp+4
 	tya
 	clc
-	adc #(PV_INTERPOLATE*4)
+	adc z:pv_interps
 	tay
 	dec z:temp+2
 	bne pv_abcd_lines_sa1
 	rts
 
 pv_abcd_lines_angle0: ; angle 0 means a/d are positive and b=c=0: ~970 clocks per line
+	; temp+2/3 = un-interpolated scanline count
+	; Y = pv_buffer_x
+	.a16
+	.i16
 	lda z:pv_zr
 	lsr
 	lsr
@@ -2550,10 +2550,84 @@ pv_abcd_lines_angle0: ; angle 0 means a/d are positive and b=c=0: ~970 clocks pe
 	; next
 	tya
 	clc
-	adc #(PV_INTERPOLATE*4)
+	adc z:pv_interps
 	tay
 	dec z:temp+2
 	bne pv_abcd_lines_angle0
+	rts
+
+pv_interpolate_4x: ; interpolate from every 4th line to every 2nd line
+	.a16
+	.i16
+	; x = pv_buffer_x
+	; temp+2/3 = lines to interpolate
+	lda temp+2
+	pha
+	phx
+	:
+		lda a:pv_hdma_ab0+0,    X
+		clc
+		adc a:pv_hdma_ab0+0+16, X
+		ror
+		sta a:pv_hdma_ab0+0+ 8, X
+		lda a:pv_hdma_ab0+2,    X
+		clc
+		adc a:pv_hdma_ab0+2+16, X
+		ror
+		sta a:pv_hdma_ab0+2+ 8, X
+		lda a:pv_hdma_cd0+0,    X
+		clc
+		adc a:pv_hdma_cd0+0+16, X
+		ror
+		sta a:pv_hdma_cd0+0+ 8, X
+		lda a:pv_hdma_cd0+2,    X
+		clc
+		adc a:pv_hdma_cd0+2+16, X
+		ror
+		sta a:pv_hdma_cd0+2+ 8, X
+		txa
+		clc
+		adc #16
+		tax
+		dec z:temp+2
+		bne :-
+	plx
+	pla
+	asl
+	sta temp+2 ; reload counter for twice as many lines at 2x interpolation
+	;jmp pv_interpolate_2x
+pv_interpolate_2x: ; interpolate from every 2nd line to every line
+	.a16
+	.i16
+	; x = pv_buffer_x
+	; temp+2/3 = lines to interpolate
+	:
+		lda a:pv_hdma_ab0+0,   X
+		clc
+		adc a:pv_hdma_ab0+0+8, X
+		ror
+		sta a:pv_hdma_ab0+0+4, X
+		lda a:pv_hdma_ab0+2,   X
+		clc
+		adc a:pv_hdma_ab0+2+8, X
+		ror
+		sta a:pv_hdma_ab0+2+4, X
+		lda a:pv_hdma_cd0+0,   X
+		clc
+		adc a:pv_hdma_cd0+0+8, X
+		ror
+		sta a:pv_hdma_cd0+0+4, X
+		lda a:pv_hdma_cd0+2,   X
+		clc
+		adc a:pv_hdma_cd0+2+8, X
+		ror
+		sta a:pv_hdma_cd0+2+4, X
+		txa
+		clc
+		adc #8
+		tax
+		dec z:temp+2
+		bne :-
 	rts
 
 pv_set_origin: ; A = scanlines above L1 to place origin (TODO currently ignored)
@@ -3002,6 +3076,7 @@ mode_y:
 		jsr sign
 		adc z:posy+3
 		sta z:posy+3
+		; TODO wrap position
 	:
 	lda z:gamepad
 	and #$0800 ; up
@@ -3032,6 +3107,38 @@ mode_y:
 		jsr sign
 		adc z:posy+3
 		sta z:posy+3
+		; TODO wrap position
+	:
+	; HACK select/start to adjust interpolation
+	lda z:newpad
+	and #$2000 ; SELECT for interpolation cycle down
+	beq :+++
+		ldx z:pv_interp
+		bne :+
+			ldx #4
+			bra :++
+		:
+		dex
+		cpx #3
+		bne :+
+			dex
+		:
+		stx z:pv_interp
+	:
+	lda z:newpad
+	and #$1000 ; START for interpolation cycle up
+	beq :+++
+		ldx z:pv_interp
+		inx
+		cpx #3
+		bne :+
+			inx
+		:
+		cpx #5
+		bcc :+
+			ldx #0
+		:
+		stx z:pv_interp
 	:
 	; HACK L/R for up/down, currently just adjusting L0, TODO implement a height variable
 	lda z:gamepad
@@ -3056,4 +3163,10 @@ mode_y:
 	; TODO print stats
 	; TODO draw bird sprite and shadow
 	; TODO world to screen transform triangle demo
+	; HACK: interpolation setting display
+	lda #'I'
+	jsr oamp_alpha_space
+	lda z:pv_interp
+	jsr oamp_hex8
+	jsr oamp_return
 	jmp print_stats
