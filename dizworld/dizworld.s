@@ -2169,7 +2169,7 @@ pv_rebuild:
 		; scale b
 		ldx z:pv_scale+1
 		stx a:$004203
-			; negate and store b while waiting
+			; negate and store a while waiting
 			lsr z:temp+4
 			bcc :+
 				eor #$FFFF
