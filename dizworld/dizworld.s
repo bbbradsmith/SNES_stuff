@@ -213,8 +213,8 @@ md7_bg: .incbin "bg.md7"
 ; sprites, 16k aligned
 .align $4000
 chr_fg: .incbin "fg.chr"
-; mode 1 sky chr, 4k aligned
-.align $1000
+; mode 1 sky chr, 8k aligned
+.align $2000
 chr_sky: .incbin "sky.chr"
 ; mode 1 sky nmt, 2k aligned
 .align $800
@@ -583,6 +583,7 @@ reset:
 	; setup PPU addresses
 	lda #((>VRAM_NMT_SKY) & $FC)
 	sta a:$2108 ; BG2SC nametable, 1-screen
+	.out .sprintf("VRAM_CHR_SKY: $%04X",VRAM_CHR_SKY)
 	lda #(VRAM_CHR_SKY >> 12) << 4
 	sta a:$210B ; BG12NBA
 	lda #((VRAM_CHR_FG >> 13) | $20)
@@ -726,6 +727,7 @@ oam_sprite_clear: ; move 4 sprites offscreen
 
 oam_sprite: ; A = tile, X = OAM start index (x4), screenx,screeny location
 	.a16
+	sta z:temp+4
 	tay
 	lda z:screenx
 	sec
@@ -752,6 +754,7 @@ oam_sprite: ; A = tile, X = OAM start index (x4), screenx,screeny location
 	lda z:temp+2
 	sta a:oam+1, X
 	lda #$30 ; high priority, palette 0, no flip
+	ora z:temp+5 ; high bit of tile
 	sta a:oam+3, X
 	; transfer X high bit to high table
 	txa
@@ -2834,7 +2837,7 @@ mode_a:
 	sta z:texely
 	jsr texel_to_screen
 	ldx #0
-	lda #$8C ; arrow
+	lda #$008C ; arrow
 	jsr oam_sprite
 	; stats
 	jmp print_stats
@@ -2996,6 +2999,7 @@ mode_b:
 	lda #MODE_B_SY
 	sta z:screeny
 	lda z:player_tile
+	and #$00FF
 	ldx #0
 	jsr oam_sprite
 	; sprite pinned to tilemap
@@ -3006,7 +3010,7 @@ mode_b:
 	sta z:texely
 	jsr texel_to_screen
 	ldx #4
-	lda #$8C ; arrow
+	lda #$008C ; arrow
 	jsr oam_sprite
 	; stats
 	jmp print_stats
@@ -3195,7 +3199,7 @@ mode_y:
 	lda z:gamepad
 	and #$0010 ; R for up
 	beq :+
-		cpx #128
+		cpx #127
 		bcs :+
 		inx
 	:
@@ -3259,6 +3263,7 @@ mode_y:
 		lda #$0004
 	:
 	ora z:player_tile
+	and #$00FF
 	jsr oam_sprite
 	; TODO world to screen transform triangle demo
 	;jsr texel_to_screen
@@ -3270,7 +3275,12 @@ mode_y:
 	sta z:screenx
 	lda #MODE_Y_SY
 	sta z:screeny
-	lda #$4C ; shadow sprite TODO shrinking sprite?
+	lda z:height
+	lsr
+	lsr
+	lsr
+	and #$000C
+	ora #$0100 ; shadow sprite selected by height
 	ldx #8
 	jsr oam_sprite
 	; stats
