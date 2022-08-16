@@ -12,7 +12,7 @@
 ;  X - Tilted view. (TODO)
 ;      L/R to adjust tilt.
 ;      D-pad to move.
-;  Y - Flying view. (TODO)
+;  Y - Flying view.
 ;      D-pad to rotate or move.
 ;      L/R to raise/lower.
 ;      Start to toggle horizon glow.
@@ -950,7 +950,7 @@ oamp_hex16_space:
 ;   .a16 .i8 DB=0 assumed
 ;
 ; umul16:         u16 a *    u16 b =  u32 p                clobbers A/X/Y                 ~620 clocks
-; umul16_8:       u16 a *     u8 b =  u24 p (A=msw)        clobbers A/X/Y                 ~400 clocks
+; smul16_u8:      s16 a *     u8 b =  s24 p (A=msw)        clobbers A/X/Y                 ~570 clocks
 ; smul16:         s16 a *    s16 b =   32 p                clobbers A/X/Y                 ~770 clocks
 ; mul16t:          16 a *     16 b =   16 A/p (truncated)  clobbers A/X/Y                 ~500 clocks
 ; smul16f:       s8.8 a *   s8.8 b = s8.8 A = s16.16 p     clobbers A/X/Y                 ~920 clocks
@@ -962,8 +962,6 @@ oamp_hex16_space:
 ;
 ; sign:         A = value, returns either 0 or $FFFF       preserves flags (.i8/.i16 allowed, DB any)
 ; sincos:       A = angle 0-255, result in cosa/sina       clobbers A/X (DB any)
-
-; TODO time these routines and give estimates
 
 ; unsigned 16-bit multiply, 32-bit result
 ; Written by 93143: https://forums.nesdev.org/viewtopic.php?p=280089#p280089
@@ -998,12 +996,12 @@ umul16: ; math_a x math_b = math_p, clobbers A/X/Y
 	sta z:math_p+2    ; 00AA + 0BB0 + 0CC0 + DD00
 	rts
 
-; unsigned 16-bit x 8-bit multiply, 24-bit result, returns high 16
-umul16_8: ; math_a x math_b = math_p, clobbers A/X/Y
+; signed 16-bit x 8-bit multiply, 24-bit result, returns high 16
+smul16_u8: ; math_a x math_b = math_p, clobbers A/X/Y
 	; DB = 0
 	.a16
 	.i8
-	ldx z:math_b+0
+	ldx z:math_b
 	stx a:$4202
 	ldy z:math_a+0
 	sty a:$4203       ; b x a0 (A)
@@ -1016,6 +1014,16 @@ umul16_8: ; math_a x math_b = math_p, clobbers A/X/Y
 	clc
 	adc a:$4216       ; 0AA + BB0
 	sta z:math_p+1
+	cpx #$80
+	bcc :+ ; if sign bit, must mutiply b by sign extend
+		ldx #$FF
+		stx a:4203
+		clc
+		lda z:math_p+2
+		adc a:$4216   ; 0AA + BB0 + C00
+		sta z:math_p+2
+		lda z:math_p+1
+	:
 	rts
 
 ; signed 16-bit multiply, 32-bit result, clobbers A/X/Y
@@ -2444,7 +2452,6 @@ pv_abcd_lines_full_: ; full perspective with independent horizontal/vertical sca
 	;    offsetting the added time for a second hardware multiply. (FF6 does something like this.)
 	;    Not sure if extra bits of accuracy for A would help in any significant way, though.
 	;    I think the 8-bit Z result is the real bottleneck for precision.
-	;    Another thought: could the 16-bit scale include sign, eliminating the negate too?
 
 pv_abcd_lines_sa1_: ; SA=1 means d=a and c=-b: ~1210 clocks per line
 	; temp+2/3 = un-interpolated scanline count
@@ -2672,7 +2679,7 @@ pv_set_origin: ; Y = scanline to place posx/posy on the centre of
 	pha ; store for a moment
 	sep #$10
 	.i8
-	jsr umul16_8
+	jsr smul16_u8
 	clc
 	adc z:posx+2
 	sta z:nmi_m7x ; ox = posx + (scanlines * b)
@@ -2681,7 +2688,7 @@ pv_set_origin: ; Y = scanline to place posx/posy on the centre of
 	sta z:nmi_hofs ; ox - 128
 	pla
 	sta z:math_a ; math_a = d coefficient
-	jsr umul16_8
+	jsr smul16_u8
 	clc
 	adc z:posy+2
 	sta z:nmi_m7y ; oy = posy + (scanlines * d)
@@ -3049,19 +3056,6 @@ MODE_Y_HEIGHT_BASE = 16
 set_mode_y:
 	.a16
 	.i8
-	; TODO we could set scale these against a flying-height variable (min + (height * range * scale))
-	lda #256*2
-	sta z:pv_s0
-	lda #256/2
-	sta z:pv_s1
-	lda #(224-64)*2
-	sta z:pv_sh
-	ldx #64
-	stx z:pv_l0
-	ldx #224
-	stx z:pv_l1
-	lda #2
-	sta z:pv_interp
 	; colormath
 	ldx #$00
 	stx z:nmi_cgwsel ; fixed colour
@@ -3116,6 +3110,7 @@ mode_y:
 		pla
 		jsr sign
 		adc z:posx+3
+		and #$0003 ; wrap to 0-1023
 		sta z:posx+3
 		; Y += D * 2
 		lda z:nmi_m7t + 6 ; D
@@ -3127,8 +3122,8 @@ mode_y:
 		pla
 		jsr sign
 		adc z:posy+3
+		and #$0003
 		sta z:posy+3
-		; TODO wrap position
 	:
 	lda z:gamepad
 	and #$0800 ; up
@@ -3147,6 +3142,7 @@ mode_y:
 		pla
 		jsr sign
 		adc z:posx+3
+		and #$0003
 		sta z:posx+3
 		; Y -= D * 2
 		lda #0
@@ -3160,8 +3156,8 @@ mode_y:
 		pla
 		jsr sign
 		adc z:posy+3
+		and #$0003
 		sta z:posy+3
-		; TODO wrap position
 	:
 	; HACK select/start to adjust interpolation
 	lda z:newpad
@@ -3213,6 +3209,32 @@ mode_y:
 	stx z:height
 	; generate perspective
 	; --------------------
+	; set horizon
+	lda z:height
+	and #$00FF
+	lsr
+	clc
+	adc #32
+	tax
+	sta z:pv_l0 ; l0 = 32+(height/2)  [32-96]
+	ldx #224
+	stx z:pv_l1
+	; set view scale
+	lda z:height
+	and #$00FF
+	asl
+	clc
+	adc #384
+	sta z:pv_s0 ; 384 + (height*2)    [384-640]
+	lda z:height
+	and #$00FF
+	lsr
+	adc #64
+	sta z:pv_s1 ; 64 + (height/2)     [64-128]
+	lda #0
+	sta z:pv_sh ; dependent-vertical scale
+	ldx #2
+	stx z:pv_interp ; 2x interpolation
 	jsr pv_rebuild
 	ldy #MODE_Y_SY ; place focus at centre of scanline 152
 	jsr pv_set_origin
@@ -3248,14 +3270,9 @@ mode_y:
 	sta z:screenx
 	lda #MODE_Y_SY
 	sta z:screeny
-	lda #$4C ; shadow sprite
+	lda #$4C ; shadow sprite TODO shrinking sprite?
 	ldx #8
 	jsr oam_sprite
-	; HACK: interpolation setting display
-	lda #'I'
-	jsr oamp_alpha_space
-	lda z:pv_interp
-	jsr oamp_hex8
-	jsr oamp_return
+	; stats
 	; TODO more relevant stats
 	jmp print_stats
