@@ -3098,8 +3098,8 @@ set_mode_y:
 	stx z:nmi_cgadsub ; enable additive blend on BG1 +BG2 + backdrop
 	ldx #1
 	stx z:nmi_bgmode
-	ldy #$40
-	sty z:player_tile ; facing up
+	ldy #$80
+	sty z:player_tile ; facing down
 	ldy #64
 	sty z:height ; halfway up
 mode_y:
@@ -3211,6 +3211,19 @@ mode_y:
 		dex
 	:
 	stx z:height
+	; select to reset position (since aspect ratio can't do anything in sh=0)
+	lda z:newpad
+	and #$2000 ; select
+	beq :+
+		stz z:posx+0
+		stz z:posx+2
+		stz z:posx+4
+		stz z:posy+0
+		stz z:posy+2
+		stz z:posy+4
+		ldx #0
+		stx z:angle
+	:
 	; generate perspective
 	; --------------------
 	; set horizon
