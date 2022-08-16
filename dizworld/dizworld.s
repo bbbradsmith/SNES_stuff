@@ -948,16 +948,15 @@ oamp_hex16_space:
 ;   values are unsigned (u16), signed (s16), either (16) or fixed point (8.8)
 ;   .a16 .i8 DB=0 assumed
 ;
-; umul16:         u16 a *    u16 b =  u32 p                clobbers A/X/Y
-; smul16:         s16 a *    s16 b =   32 p,               clobbers A/X/Y
-; mul16t:          16 a *     16 b =   16 A/p (truncated)  clobbers A/X/Y
-; smul16f:       s8.8 a *   s8.8 b = s8.8 A = s16.16 p     clobbers A/X/Y
-; smul32f_16f:  s24.8 a *   s8.8 b = s8.8 A =  s8.24 p     clobbers A/X/Y,a,b
-; smul32ft:     s24.8 a * s16.16 b = s8.8 A = s16.24 r     clobbers A/X/Y,a,b,temp0-13
+; umul16:         u16 a *    u16 b =  u32 p                clobbers A/X/Y                 ~620 clocks
+; smul16:         s16 a *    s16 b =   32 p,               clobbers A/X/Y                 ~770 clocks
+; mul16t:          16 a *     16 b =   16 A/p (truncated)  clobbers A/X/Y                 ~500 clocks
+; smul16f:       s8.8 a *   s8.8 b = s8.8 A = s16.16 p     clobbers A/X/Y                 ~920 clocks
+; smul32f_16f:  s24.8 a *   s8.8 b = s8.8 A =  s8.24 p     clobbers A/X/Y,a,b             ~2570 clocks (1.8 scanlines)
+; smul32ft:     s24.8 a * s16.16 b = s8.8 A = s16.24 r     clobbers A/X/Y,a,b,temp0-13    ~3600 clocks (2.6 scanlines)
 ;
-; udiv16:         u16 a /    u16 b =  u16 p    % u16 r     clobbers A/X (DB any)
-; udiv32:         u32 a /    u32 b =  u32 p    % u32 r     clobbers A/X (DB any)
-; recip16f:           1 /   s8.8 A = s8.8 A = s16.16 p     clobbers A/X,a,b (DB any)
+; udiv32:         u32 a /    u32 b =  u32 p    % u32 r     clobbers A/X (DB any)          ~12400 clocks (9 scanlines)
+; recip16f:           1 /   s8.8 A = s8.8 A = s16.16 p     clobbers A/X,a,b (DB any)      ~12450 clocks
 ;
 ; sign:         A = value, returns either 0 or $FFFF       preserves flags (.i8/.i16 allowed, DB any)
 ; sincos:       A = angle 0-255, result in cosa/sina       clobbers A/X (DB any)
@@ -1174,33 +1173,6 @@ smul32ft: ; a = 24.8 fixed, b = 16.16 fixed, 16.24 result in math_r, returns 8.8
 	adc a:$4216     ; 0AAAA + BBB00 + CCC00 + D0000 + E0000 + F0000
 	sta z:math_r+4
 	lda z:math_r+3 ; return top 16 bits
-	rts
-
-; 16-bit / 16-bit division, 16 + 16 result
-; math_a / math_b = math_p
-; math_a % math_b = math_r
-; clobbers A/X
-; This could potentially be hardware-accelerated for ~2x speedup:
-;   See: https://github.com/bbbradsmith/SNES_stuff/blob/main/multest/test_div16.s
-udiv16:
-	; DB = any
-	.a16
-	.i8
-	lda z:math_a
-	asl
-	sta z:math_p
-	lda #0
-	ldx #16
-@loop:
-	rol
-	cmp z:math_b
-	bcc :+
-		sbc z:math_b
-	:
-	rol z:math_p
-	dex
-	bne @loop
-	sta z:math_r
 	rts
 
 ; 32-bit / 32-bit division, 32 + 32 result
@@ -2227,7 +2199,7 @@ pv_rebuild:
 		bne :+
 		; if b=0 (assume c=0) angle is either 0, 180
 		; if a/d are not negated, angle=0
-		jsr pv_abcd_lines_angle0 ; only calculates a/d, fills 
+		jsr pv_abcd_lines_angle0_ ; only calculates a/d, fills 
 		bra :+++
 	:
 	sep #$20
@@ -2241,12 +2213,12 @@ pv_rebuild:
 		; if b==c and a==d then SA=1
 		rep #$20
 		.a16
-		jsr pv_abcd_lines_sa1
+		jsr pv_abcd_lines_sa1_
 		bra :++
 	:
 		rep #$20
 		.a16
-		jsr pv_abcd_lines_full
+		jsr pv_abcd_lines_full_
 	:
 	plb ; DB = $7E
 	; Generate linear interpolation, apply negation
@@ -2267,10 +2239,10 @@ pv_rebuild:
 		lda z:pv_interps
 		cmp #(4*4)
 		beq :+
-			jsr pv_interpolate_2x
+			jsr pv_interpolate_2x_
 			bra :++
 		:
-			jsr pv_interpolate_4x
+			jsr pv_interpolate_4x_
 		:
 	@interpolate_end:
 	sep #$20
@@ -2341,7 +2313,7 @@ pv_rebuild:
 	plp
 	rts
 
-pv_abcd_lines_full: ; full perspective with independent horizontal/vertical scale: ~1670 clocks per line
+pv_abcd_lines_full_: ; full perspective with independent horizontal/vertical scale: ~1670 clocks per line
 	; temp+2/3 = un-interpolated scanline count
 	; temp+4/5 = pv_negate
 	; Y = pv_buffer_x
@@ -2435,11 +2407,24 @@ pv_abcd_lines_full: ; full perspective with independent horizontal/vertical scal
 	tay
 	dec z:temp+2
 	beq :+
-	jmp pv_abcd_lines_full
+	jmp pv_abcd_lines_full_
 :
 	rts
+	; Optimization notes:
+	; 1. The negation test (lsr temp+4, bcc) could be eliminated by creating 4 permuations of this routine.
+	;    I did not want to complicate this example with 4 copies of the same code, but it would save a few cycles.
+	; 2. If the arrays were placed in LoRAM area (<$2000) and this code was placed in a LoROM area of memory
+	;    (e.g. banks $80-BF if HiROM), we could use absolute addressing for both the hardware multiplier,
+	;    and our output array at the same time. Instead I used far addressing for the array and DB=0
+	;    so that the arrays can go anywhere in RAM, and the code can run from both LoROM and HiROM.
+	; 3. Instead of Z*A at 8x8=16 multiply, could instead use 8x16=16 with two hardware multiplies.
+	;    This would eliminate the 5 LSRs (i.e. scale would be 1.10 instead of 1.7, with its top 5 bits = 0),
+	;    offsetting the added time for a second hardware multiply. (FF6 does something like this.)
+	;    Not sure if extra bits of accuracy for A would help in any significant way, though.
+	;    I think the 8-bit Z result is the real bottleneck for precision.
+	;    Another thought: could the 16-bit scale include sign, eliminating the negate too?
 
-pv_abcd_lines_sa1: ; SA=1 means d=a and c=-b: ~1210 clocks per line
+pv_abcd_lines_sa1_: ; SA=1 means d=a and c=-b: ~1210 clocks per line
 	; temp+2/3 = un-interpolated scanline count
 	; temp+4/5 = pv_negate
 	; Y = pv_buffer_x
@@ -2505,10 +2490,10 @@ pv_abcd_lines_sa1: ; SA=1 means d=a and c=-b: ~1210 clocks per line
 	adc z:pv_interps
 	tay
 	dec z:temp+2
-	bne pv_abcd_lines_sa1
+	bne pv_abcd_lines_sa1_
 	rts
 
-pv_abcd_lines_angle0: ; angle 0 means a/d are positive and b=c=0: ~970 clocks per line
+pv_abcd_lines_angle0_: ; angle 0 means a/d are positive and b=c=0: ~970 clocks per line
 	; temp+2/3 = un-interpolated scanline count
 	; Y = pv_buffer_x
 	.a16
@@ -2556,10 +2541,10 @@ pv_abcd_lines_angle0: ; angle 0 means a/d are positive and b=c=0: ~970 clocks pe
 	adc z:pv_interps
 	tay
 	dec z:temp+2
-	bne pv_abcd_lines_angle0
+	bne pv_abcd_lines_angle0_
 	rts
 
-pv_interpolate_4x: ; interpolate from every 4th line to every 2nd line
+pv_interpolate_4x_: ; interpolate from every 4th line to every 2nd line
 	.a16
 	.i16
 	; x = pv_buffer_x
@@ -2598,8 +2583,8 @@ pv_interpolate_4x: ; interpolate from every 4th line to every 2nd line
 	pla
 	asl
 	sta temp+2 ; reload counter for twice as many lines at 2x interpolation
-	;jmp pv_interpolate_2x
-pv_interpolate_2x: ; interpolate from every 2nd line to every line
+	;jmp pv_interpolate_2x_
+pv_interpolate_2x_: ; interpolate from every 2nd line to every line
 	.a16
 	.i16
 	; x = pv_buffer_x
@@ -3149,6 +3134,9 @@ mode_y:
 	lda z:gamepad
 	and #$0010 ; R for up (sky goes down)
 	beq :+
+		;inc z:pv_s0 ; playing with s0
+		;inc z:pv_s0
+		;bra :+
 		ldx z:pv_l0
 		inx
 		cpx z:pv_l1
@@ -3158,6 +3146,9 @@ mode_y:
 	lda z:gamepad
 	and #$0020 ; L for down (sky goes up)
 	beq :+
+		;dec z:pv_s0 ; playing with s0
+		;dec z:pv_s0
+		;bra :+
 		ldx z:pv_l0
 		beq :+
 		dex
