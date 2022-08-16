@@ -3132,9 +3132,13 @@ mode_x:
 	:
 	stx z:tilt
 	; rebuild perspective if tilt changed
+	lda z:newpad
+	and #$2000
+	bne :+ ; select changes aspect ratio adjustment
 	ldx z:tilt
 	cpx z:tilt_last
 	beq @tilt_end
+	:
 		ldx #0
 		stx z:pv_l0
 		ldx #224
@@ -3145,14 +3149,28 @@ mode_x:
 		asl
 		clc
 		adc #256
-		; TODO 7/8 aspect multiplier
+		ldx z:aspect
+		beq :+ ; 8/7 aspect ratio adjustment
+			sta z:math_a
+			lda #(256*8)/7
+			sta z:math_b
+			jsr umul16
+			lda z:math_p+1
+		:
 		sta z:pv_s0
 		lda z:tilt
 		and #$00FF
 		eor #$FFFF
 		sec
 		adc #256
-		; TODO 7/8 aspect multiplier
+		ldx z:aspect
+		beq :+ ; 8/7 aspect ratio adjustment
+			sta z:math_a
+			lda #(256*8)/7
+			sta z:math_b
+			jsr umul16
+			lda z:math_p+1
+		:
 		sta z:pv_s1
 		lda z:tilt
 		and #$00FF
