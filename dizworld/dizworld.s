@@ -82,6 +82,7 @@ scale2:       .res 4 ; for separate axis scale
 posx:         .res 6 ; position for some modes with subpixel precision
 posy:         .res 6
 player_tile:  .res 1 ; player sprite tile
+height:       .res 1 ; player height
 
 cosa:         .res 2 ; sincos result
 sina:         .res 2
@@ -949,7 +950,8 @@ oamp_hex16_space:
 ;   .a16 .i8 DB=0 assumed
 ;
 ; umul16:         u16 a *    u16 b =  u32 p                clobbers A/X/Y                 ~620 clocks
-; smul16:         s16 a *    s16 b =   32 p,               clobbers A/X/Y                 ~770 clocks
+; umul16_8:       u16 a *     u8 b =  u24 p (A=msw)        clobbers A/X/Y                 ~400 clocks
+; smul16:         s16 a *    s16 b =   32 p                clobbers A/X/Y                 ~770 clocks
 ; mul16t:          16 a *     16 b =   16 A/p (truncated)  clobbers A/X/Y                 ~500 clocks
 ; smul16f:       s8.8 a *   s8.8 b = s8.8 A = s16.16 p     clobbers A/X/Y                 ~920 clocks
 ; smul32f_16f:  s24.8 a *   s8.8 b = s8.8 A =  s8.24 p     clobbers A/X/Y,a,b             ~2570 clocks (1.8 scanlines)
@@ -994,6 +996,26 @@ umul16: ; math_a x math_b = math_p, clobbers A/X/Y
 :
 	adc a:$4216
 	sta z:math_p+2    ; 00AA + 0BB0 + 0CC0 + DD00
+	rts
+
+; unsigned 16-bit x 8-bit multiply, 24-bit result, returns high 16
+umul16_8: ; math_a x math_b = math_p, clobbers A/X/Y
+	; DB = 0
+	.a16
+	.i8
+	ldx z:math_b+0
+	stx a:$4202
+	ldy z:math_a+0
+	sty a:$4203       ; b x a0 (A)
+	ldx z:math_a+1
+	stz z:math_p+2
+	lda a:$4216
+	stx a:$4203       ; b x a1 (B)
+	sta z:math_p+0    ; 0AA
+	lda z:math_p+1
+	clc
+	adc a:$4216       ; 0AA + BB0
+	sta z:math_p+1
 	rts
 
 ; signed 16-bit multiply, 32-bit result, clobbers A/X/Y
@@ -2618,24 +2640,57 @@ pv_interpolate_2x_: ; interpolate from every 2nd line to every line
 		bne :-
 	rts
 
-pv_set_origin: ; A = scanlines above L1 to place origin (TODO currently ignored)
+pv_set_origin: ; Y = scanline to place posx/posy on the centre of
 	.a16
 	.i8
-	; TODO offset posx/posy by A scanlines
-	lda z:posx+2
-	sta z:nmi_m7x ; ox
+	sty z:temp+0 ; temp+0 = target scanline
+	tya
+	sec
+	sbc z:pv_l0
+	and #$00FF
+	asl
+	asl
+	sta z:temp+2 ; temp+2/3 = index to line
+	sep #$20
+	rep #$10
+	.a8
+	.i16
+	lda z:pv_l1
+	sec
+	sbc z:temp+0
+	sta z:math_b ; math_b = scanlines above bottom
+	jsr pv_buffer_x ; X = index to pv buffers
+	rep #$20
+	.a16
+	txa
+	clc
+	adc z:temp+2
+	tax ; X = index of target scanline in pv buffers
+	lda f:pv_hdma_ab0+2, X
+	sta z:math_a ; math_a = b coefficient
+	lda f:pv_hdma_cd0+2, X
+	pha ; store for a moment
+	sep #$10
+	.i8
+	jsr umul16_8
+	clc
+	adc z:posx+2
+	sta z:nmi_m7x ; ox = posx + (scanlines * b)
 	sec
 	sbc #128
 	sta z:nmi_hofs ; ox - 128
-	lda z:posy+2
-	sta z:nmi_m7y ; oy
+	pla
+	sta z:math_a ; math_a = d coefficient
+	jsr umul16_8
+	clc
+	adc z:posy+2
+	sta z:nmi_m7y ; oy = posy + (scanlines * d)
 	lda z:pv_l1
 	and #$00FF
 	eor #$FFFF
 	sec
-	adc z:posy+2
+	adc z:nmi_m7y
 	sta z:nmi_vofs ; oy - L1
-	; TODO
 	; scroll sky to meet L0 and pan with angle
 	lda z:angle
 	asl
@@ -2933,7 +2988,7 @@ mode_b:
 	sta z:screenx
 	lda #MODE_B_SY
 	sta z:screeny
-	lda player_tile
+	lda z:player_tile
 	ldx #0
 	jsr oam_sprite
 	; sprite pinned to tilemap
@@ -2985,6 +3040,12 @@ mode_x:
 ; - L/R raises/lowers view
 ;
 
+; focus location on ground
+MODE_Y_SX = 128
+MODE_Y_SY = 168
+; minimum height of bird above the ground (height is 0-128 + this)
+MODE_Y_HEIGHT_BASE = 16
+
 set_mode_y:
 	.a16
 	.i8
@@ -3008,22 +3069,21 @@ set_mode_y:
 	stx z:nmi_cgadsub ; enable additive blend on BG1 +BG2 + backdrop
 	ldx #1
 	stx z:nmi_bgmode
-	jsr oam_sprite_clear
+	ldy #$40
+	sty z:player_tile ; facing up
+	ldy #64
+	sty z:height ; halfway up
 mode_y:
 	; rotate with left/right
 	ldx z:angle
 	lda z:gamepad
 	and #$0200 ; left
 	beq :+
-		ldy #$00
-		sty z:player_tile
 		inx
 	:
 	lda z:gamepad
 	and #$0100 ; right
 	beq :+
-		ldy #$04
-		sty z:player_tile
 		dex
 	:
 	stx z:angle
@@ -3044,10 +3104,11 @@ mode_y:
 	lda z:gamepad
 	and #$0400 ; down
 	beq :+
-		ldy #$0C
+		ldy #$80
 		sty z:player_tile
-		; X += B
+		; X += B * 2
 		lda z:nmi_m7t + 2 ; B
+		asl
 		pha
 		clc
 		adc z:posx+1
@@ -3056,8 +3117,9 @@ mode_y:
 		jsr sign
 		adc z:posx+3
 		sta z:posx+3
-		; Y += D
+		; Y += D * 2
 		lda z:nmi_m7t + 6 ; D
+		asl
 		pha
 		clc
 		adc z:posy+1
@@ -3071,12 +3133,13 @@ mode_y:
 	lda z:gamepad
 	and #$0800 ; up
 	beq :+
-		ldy #$08
+		ldy #$40
 		sty z:player_tile
-		; X -= B
+		; X -= B * 2
 		lda #0
 		sec
 		sbc z:nmi_m7t + 2 ; B
+		asl
 		pha
 		clc
 		adc z:posx+1
@@ -3085,10 +3148,11 @@ mode_y:
 		jsr sign
 		adc z:posx+3
 		sta z:posx+3
-		; Y -= D
+		; Y -= D * 2
 		lda #0
 		sec
 		sbc z:nmi_m7t + 6 ; D
+		asl
 		pha
 		clc
 		adc z:posy+1
@@ -3130,39 +3194,68 @@ mode_y:
 		:
 		stx z:pv_interp
 	:
-	; HACK L/R for up/down, currently just adjusting L0, TODO implement a height variable
+	; L/R = up/down
+	ldx z:height
 	lda z:gamepad
-	and #$0010 ; R for up (sky goes down)
+	and #$0010 ; R for up
 	beq :+
-		;inc z:pv_s0 ; playing with s0
-		;inc z:pv_s0
-		;bra :+
-		ldx z:pv_l0
-		inx
-		cpx z:pv_l1
+		cpx #128
 		bcs :+
-		stx z:pv_l0
+		inx
 	:
 	lda z:gamepad
-	and #$0020 ; L for down (sky goes up)
+	and #$0020 ; L for down
 	beq :+
-		;dec z:pv_s0 ; playing with s0
-		;dec z:pv_s0
-		;bra :+
-		ldx z:pv_l0
-		beq :+
+		cpx #1
+		bcc :+
 		dex
-		stx z:pv_l0
 	:
-	jsr pv_set_origin
+	stx z:height
+	; generate perspective
+	; --------------------
 	jsr pv_rebuild
-	; TODO print stats
-	; TODO draw bird sprite and shadow
+	ldy #MODE_Y_SY ; place focus at centre of scanline 152
+	jsr pv_set_origin
+	; animate and draw sprites and stats
+	; ----------------------------------
+	jsr oam_sprite_clear
+	; draw flying bird
+	lda #MODE_Y_SX
+	sta z:screenx
+	lda #MODE_Y_SY - MODE_Y_HEIGHT_BASE
+	sec
+	sbc z:height
+	and #$00FF
+	sta z:screeny
+	ldx #0
+	; animate bird 0,4,8,4 pattern
+	lda z:nmi_count
+	lsr
+	and #$000C ; +4 every 8 frames
+	cmp #$000C
+	bcc :+
+		lda #$0004
+	:
+	ora z:player_tile
+	jsr oam_sprite
 	; TODO world to screen transform triangle demo
+	;jsr texel_to_screen
+	;ldx #4
+	;lda #$8C ; arrow
+	;jsr oam_sprite
+	; shadow at focus
+	lda #MODE_Y_SX
+	sta z:screenx
+	lda #MODE_Y_SY
+	sta z:screeny
+	lda #$4C ; shadow sprite
+	ldx #8
+	jsr oam_sprite
 	; HACK: interpolation setting display
 	lda #'I'
 	jsr oamp_alpha_space
 	lda z:pv_interp
 	jsr oamp_hex8
 	jsr oamp_return
+	; TODO more relevant stats
 	jmp print_stats
