@@ -2,17 +2,18 @@
 ;
 ; Demonstrating 4 practical uses of Mode 7
 ;  Select - Toggle aspect ratio correction
+;  Start - Toggle stats / pause spin
 ;  A - Rotate background around a pivot point. (Suitable for bosses.)
 ;      D-pad to scroll.
 ;      L/R to scale.
 ;      Start to pause the spin.
-;  B - Rotate around player. (Overhead level).
+;  B - Rotate around player. (Overhead level.)
 ;      D-pad to rotate or move.
 ;      L/R to scale.
 ;  X - Tilted view. (TODO)
 ;      L/R to adjust tilt.
 ;      D-pad to move.
-;  Y - Flying view.
+;  Y - Flying view. (RPG world map, or racing game.)
 ;      D-pad to rotate or move.
 ;      L/R to raise/lower.
 ;      Start to toggle horizon glow.
@@ -1222,7 +1223,7 @@ udiv32:
 	lda z:math_a+2
 	rol
 	sta z:math_p+2
-	stz z:math_r+2 ; A used temporarily as low word of r
+	stz z:math_r+2 ; A is used temporarily as low word of r
 	lda #0
 	ldx #32
 @loop:
@@ -2447,10 +2448,10 @@ pv_abcd_lines_full_: ; full perspective with independent horizontal/vertical sca
 	; 1. The negation test (lsr temp+4, bcc) could be eliminated by creating 4 permuations of this routine.
 	;    I did not want to complicate this example with 4 copies of the same code, but it would save a few cycles.
 	; 2. If the arrays were placed in LoRAM area (<$2000) and this code was placed in a LoROM area of memory
-	;    (e.g. banks $80-BF if HiROM), we could use absolute addressing for both the hardware multiplier,
+	;    (e.g. banks $80-BF if HiROM), we could use absolute addressing for both the hardware multiplier
 	;    and our output array at the same time. Instead I used far addressing for the array and DB=0
 	;    so that the arrays can go anywhere in RAM, and the code can run from both LoROM and HiROM.
-	; 3. Instead of Z*A at 8x8=16 multiply, could instead use 8x16=16 with two hardware multiplies.
+	; 3. Instead of Z*A at 8x8=16 multiply, could perhaps use 8x16=16 with two hardware multiplies.
 	;    This would eliminate the 5 LSRs (i.e. scale would be 1.10 instead of 1.7, with its top 5 bits = 0),
 	;    offsetting the added time for a second hardware multiply. (FF6 does something like this.)
 	;    Not sure if extra bits of accuracy for A would help in any significant way, though.
@@ -2727,7 +2728,7 @@ colmath_off:
 	stx z:nmi_cgadsub
 	rts
 
-print_stats:
+print_stats_common:
 	.a16
 	.i8
 	; ABCD
@@ -2767,6 +2768,16 @@ print_stats:
 	lda z:nmi_vofs
 	jsr oamp_hex16
 	jsr oamp_return
+	rts
+
+print_stats_simple:
+	.a16
+	.i8
+	ldx z:pause
+	bne :+
+		rts
+	:
+	jsr print_stats_common
 	; Mx,My
 	jsr oamp_space
 	lda #'M'
@@ -2774,6 +2785,26 @@ print_stats:
 	lda z:scale+0
 	jsr oamp_hex16_space
 	lda z:scale+2
+	jsr oamp_hex16
+	jmp oamp_return
+
+print_stats_pv:
+	.a16
+	.i8
+	ldx z:pause
+	bne :+
+		rts
+	:
+	jsr print_stats_common
+	; S0,S1,SH
+	jsr oamp_space
+	lda #'S'
+	jsr oamp_alpha_space
+	lda z:pv_s0
+	jsr oamp_hex16_space
+	lda z:pv_s1
+	jsr oamp_hex16_space
+	lda z:pv_sh
 	jsr oamp_hex16
 	jmp oamp_return
 
@@ -2840,7 +2871,7 @@ mode_a:
 	lda #$008C ; arrow
 	jsr oam_sprite
 	; stats
-	jmp print_stats
+	jmp print_stats_simple
 
 ;
 ; =============================================================================
@@ -3013,7 +3044,7 @@ mode_b:
 	lda #$008C ; arrow
 	jsr oam_sprite
 	; stats
-	jmp print_stats
+	jmp print_stats_simple
 
 ;
 ; =============================================================================
@@ -3163,37 +3194,6 @@ mode_y:
 		and #$0003
 		sta z:posy+3
 	:
-	; HACK select/start to adjust interpolation
-	lda z:newpad
-	and #$2000 ; SELECT for interpolation cycle down
-	beq :+++
-		ldx z:pv_interp
-		bne :+
-			ldx #4
-			bra :++
-		:
-		dex
-		cpx #3
-		bne :+
-			dex
-		:
-		stx z:pv_interp
-	:
-	lda z:newpad
-	and #$1000 ; START for interpolation cycle up
-	beq :+++
-		ldx z:pv_interp
-		inx
-		cpx #3
-		bne :+
-			inx
-		:
-		cpx #5
-		bcc :+
-			ldx #0
-		:
-		stx z:pv_interp
-	:
 	; L/R = up/down
 	ldx z:height
 	lda z:gamepad
@@ -3284,5 +3284,4 @@ mode_y:
 	ldx #8
 	jsr oam_sprite
 	; stats
-	; TODO more relevant stats
-	jmp print_stats
+	jmp print_stats_pv
