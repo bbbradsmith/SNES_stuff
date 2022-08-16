@@ -10,13 +10,13 @@
 ;  B - Rotate around player. (Overhead level.)
 ;      D-pad to rotate or move.
 ;      L/R to scale.
-;  X - Tilted view. (TODO)
+;  X - Tilted view.
 ;      L/R to adjust tilt.
 ;      D-pad to move.
 ;  Y - Flying view. (RPG world map, or racing game.)
 ;      D-pad to rotate or move.
 ;      L/R to raise/lower.
-;      Start to toggle horizon glow.
+;      Select to reset position. (Aspect ratio adjustment does not apply to this mode.)
 ;
 ; rainwarrior 2022
 ; http://rainwarrior.ca
@@ -84,6 +84,8 @@ posx:         .res 6 ; position for some modes with subpixel precision
 posy:         .res 6
 player_tile:  .res 1 ; player sprite tile
 height:       .res 1 ; player height
+tilt:         .res 1 ; mode X tilt
+tilt_last:    .res 1
 
 cosa:         .res 2 ; sincos result
 sina:         .res 2
@@ -2898,7 +2900,7 @@ set_mode_b:
 	ldx #7
 	stx z:nmi_bgmode
 	ldx #0
-	stx new_hdma_en
+	stx z:new_hdma_en
 	stx z:angle
 	lda #$0100
 	sta z:scale
@@ -3049,30 +3051,136 @@ mode_b:
 ;
 ; =============================================================================
 ; Mode X test "Tilted plane"
-; - Map appears with perspective tilt, 1:1 at player centre
+; - Map appears with perspective tilt
 ; - Player moves only orthogonally
-; - L/R adjusts tilt amount?
+; - L/R adjusts tilt amount
 ;
 
-; TODO
-; is really just a copy of mode X but:
-; 1. only recalculate when we tilt with L/R to demonstrate how it's not needed
-; 2. just disable colormath to hide the fade
-; 3. mode 1 background setup doesn't matter
-; 4. simplified world to pixel calculation with no rotation?
+MODE_X_SX = 128
+MODE_X_SY = 112
 
 set_mode_x:
 	.a16
 	.i8
 	jsr colmath_off
 	ldx #7
-	ldx #3 ; mode 3 HACK
 	stx z:nmi_bgmode
 	ldx #0
-	stx new_hdma_en
+	stx z:new_hdma_en
+	stx z:angle
+	stx z:pv_interp
+	ldx #64
+	stx z:tilt
+	inx
+	stx z:tilt_last ; cause rebuild
+	stz z:posx+2
+	stz z:posy+2
+	ldx #00
+	stx z:player_tile ; face left
 	jsr oam_sprite_clear
 mode_x:
-	jmp simple_scroll
+	lda z:gamepad
+	and #$0200 ; left
+	beq :+
+		ldy #$00
+		sty z:player_tile
+		dec z:posx+2
+	:
+	lda z:gamepad
+	and #$0100 ; right
+	beq :+
+		ldy #$04
+		sty z:player_tile
+		inc z:posx+2
+	:
+	lda z:gamepad
+	and #$0800 ; up
+	beq :+
+		ldy #$08
+		sty z:player_tile
+		dec z:posy+2
+	:
+	lda z:gamepad
+	and #$0400 ; down
+	beq :+
+		ldy #$0C
+		sty z:player_tile
+		inc z:posy+2
+	:
+	; wrap position
+	lda z:posx+2
+	and #$03FF
+	sta z:posx+2
+	lda z:posy+2
+	and #$03FF
+	sta z:posy+2
+	; L/R = adjust tilt
+	ldx z:tilt
+	lda z:gamepad
+	and #$0010 ; R for tilt more
+	beq :+
+		cpx #196
+		bcs :+
+		inx
+	:
+	lda z:gamepad
+	and #$0020 ; L for tilt less
+	beq :+
+		cpx #1
+		bcc :+
+		dex
+	:
+	stx z:tilt
+	; rebuild perspective if tilt changed
+	ldx z:tilt
+	cpx z:tilt_last
+	beq @tilt_end
+		ldx #0
+		stx z:pv_l0
+		ldx #224
+		stx z:pv_l1
+		lda z:tilt
+		and #$00FF
+		asl
+		asl
+		clc
+		adc #256
+		; TODO 7/8 aspect multiplier
+		sta z:pv_s0
+		lda z:tilt
+		and #$00FF
+		eor #$FFFF
+		sec
+		adc #256
+		; TODO 7/8 aspect multiplier
+		sta z:pv_s1
+		lda z:tilt
+		and #$00FF
+		clc
+		adc #224
+		sta z:pv_sh
+		jsr pv_rebuild
+		ldx z:tilt
+		stx z:tilt_last
+	@tilt_end:
+	ldy #MODE_X_SY ; place player focus on SY
+	jsr pv_set_origin
+	; player sprite
+	lda #MODE_B_SX
+	sta z:screenx
+	lda #MODE_B_SY
+	sta z:screeny
+	lda z:player_tile
+	and #$00FF
+	ldx #0
+	jsr oam_sprite
+	; TODO world to screen transform triangle demo
+	; TODO simplified world to pixel calculation with no rotation?
+	;jsr texel_to_screen
+	;ldx #4
+	;lda #$8C ; arrow
+	;jsr oam_sprite
+	jmp print_stats_pv
 
 ;
 ; =============================================================================
@@ -3253,7 +3361,7 @@ mode_y:
 	ldx #2
 	stx z:pv_interp ; 2x interpolation
 	jsr pv_rebuild
-	ldy #MODE_Y_SY ; place focus at centre of scanline 152
+	ldy #MODE_Y_SY ; place focus at centre of scanline SY
 	jsr pv_set_origin
 	; animate and draw sprites and stats
 	; ----------------------------------
