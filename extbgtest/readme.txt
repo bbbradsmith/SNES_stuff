@@ -5,10 +5,11 @@ Shows colours and layering of Mode 7 with EXTBG.
 The row marked 0 uses pixel values from 0-127
 The row marked 1 uses pixel values from 128-255
 The BG palettes for 128+ are darkened to show that BG1 is using them even with EXTBG enabled
+The 4 movable sprites are on their numbered layer.
 
 Select = toggle direct color
 Start = toggle BG1 or BG2
-A/B/Y/X = select sprite to move
+A/B/Y/X = select sprite 0/1/2/3 to move
 d-pad = move sprite
 
 
