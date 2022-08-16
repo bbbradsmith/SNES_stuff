@@ -6,10 +6,11 @@
 ; The row marked 0 uses pixel values from 0-127
 ; The row marked 1 uses pixel values from 128-255
 ; The BG palettes for 128+ are darkened to show that BG1 is using them even with EXTBG enabled
+; The 4 movable sprites are on their numbered layer.
 ;
 ; Select = toggle direct color
 ; Start = toggle BG1 or BG2
-; A/B/Y/X = select sprite to move
+; A/X/Y/B = select sprite 0/1/2/3 to move
 ; d-pad = move sprite
 ;
 ; rainwarrior 2022
@@ -510,7 +511,7 @@ run:
 		stx z:sprite
 	:
 	lda z:gamepad
-	and #$8000 ; B
+	and #$0040 ; X
 	beq :+
 		ldx #4
 		stx z:sprite
@@ -522,7 +523,7 @@ run:
 		stx z:sprite
 	:
 	lda z:gamepad
-	and #$0040 ; X
+	and #$8000 ; B
 	beq :+
 		ldx #12
 		stx z:sprite

@@ -9,7 +9,7 @@ The 4 movable sprites are on their numbered layer.
 
 Select = toggle direct color
 Start = toggle BG1 or BG2
-A/B/Y/X = select sprite 0/1/2/3 to move
+A/X/Y/B = select sprite 0/1/2/3 to move
 d-pad = move sprite
 
 
