@@ -2801,7 +2801,43 @@ pv_texel_to_screen: ; input: texelx,texely output screenx,screeny (pv_rebuild mu
 	sec
 	sbc z:nmi_m7y
 	sta z:screeny
-	; 2. project into the rotated frustum
+	; 2. try wrapping if the distance is larger than half the map
+	ldx z:pv_wrap
+	beq @wrap_end
+		lda z:screenx
+		bmi @wrap_xm
+			cmp #512
+			bcc @wrap_x_end
+			sec
+			sbc #1024
+			sta z:screenx ; try X-1024
+			bra @wrap_x_end
+		@wrap_xm:
+			cmp #.loword(-513)
+			bcs @wrap_x_end
+			clc
+			adc #1024
+			sta z:screenx ; try X+1024
+			;bra @wrap_y
+		@wrap_x_end:
+		lda z:screeny
+		bmi @wrap_ym
+			cmp #512
+			bcc @wrap_end
+			sec
+			sbc #1024
+			sta z:screeny ; try Y-1024
+			bra @wrap_end
+		@wrap_ym:
+			cmp #.loword(-513)
+			bcs @wrap_end
+			clc
+			adc #1024
+			sta z:screeny ; try Y+1024
+			;bra @wrap_end
+		;
+	@wrap_end:
+	; 3. project into the rotated frustum
 	ldx z:pv_scale+1
 	bne @rotate
 	lda z:pv_negate
@@ -2840,51 +2876,6 @@ pv_texel_to_screen: ; input: texelx,texely output screenx,screeny (pv_rebuild mu
 	clc
 	adc z:pv_sh_
 	sta z:screeny
-	; 3. try wrapping if outside the rectangular bounds of the frustum (S0 wide, SH tall)
-	ldx z:pv_wrap
-	beq @wrap_end
-		lda z:screenx
-		bmi @wrap_xm
-			lda z:pv_s0
-			lsr
-			cmp z:screenx
-			bcs @wrap_x_end ; s0/2 >= X, already in range
-			lda z:screenx
-			sec
-			sbc #1024
-			sta z:screenx ; try X-1024
-			bra @wrap_x_end
-		@wrap_xm:
-			lda z:pv_s0
-			lsr
-			eor #$FFFF
-			;inc
-			cmp z:screenx
-			bcc @wrap_x_end ; -s0/2 <= X, already in range
-			lda z:screenx
-			clc
-			adc #1024
-			sta z:screenx ; try X+1024
-			;bra @wrap_y
-		@wrap_x_end:
-		lda z:screeny
-		bmi @wrap_ym
-			cmp z:pv_sh_
-			bcc @wrap_end
-			lda z:screeny
-			sec
-			sbc #1024
-			sta z:screeny ; try Y-1024
-			bra @wrap_end
-		@wrap_ym:
-			; <0 is above the horizon
-			;lda z:screeny
-			clc
-			adc #1024
-			sta z:screeny ; try Y+1024
-			;bra @wrap_end
-		;
-	@wrap_end:
 	; 4. transform Y to scanline
 	;
 	; Interpolating Y from 0 to SH with perspective correction gives the relationship between Y in frustum-texel-space and scanlines:
