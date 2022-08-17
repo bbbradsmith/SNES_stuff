@@ -129,9 +129,11 @@ pv_s0:        .res 2 ; horizontal texel distance at l0
 pv_s1:        .res 2 ; horizontal texel distance at l1
 pv_sh:        .res 2 ; vertical texel distance from l0 to l1, sh=0 to copy s0 scale for efficiency: (s0*(l1-l0)/256)
 pv_interp:    .res 1 ; interpolate every X lines, 0,1=1x (no interpolation, 2=2x, 4=4x, other values invalid
+pv_wrap:      .res 1 ; 0 if no wrapping, 1 if wrapping (does not affect PPU wrapping)
 ; temporaries
 pv_zr:        .res 2 ; interpolated 1/Z
 pv_zr_inc:    .res 2 ; zr increment per line
+pv_sh_:       .res 2 ; =pv_sh, or if pv_sh=0 then computed value
 pv_scale:     .res 4 ; 8-bit scale of a/b/c/d
 pv_negate:    .res 1 ; negation of a/b/c/d
 pv_interps:   .res 2 ; interpolate * 4 for stride increment
@@ -586,7 +588,6 @@ reset:
 	; setup PPU addresses
 	lda #((>VRAM_NMT_SKY) & $FC)
 	sta a:$2108 ; BG2SC nametable, 1-screen
-	.out .sprintf("VRAM_CHR_SKY: $%04X",VRAM_CHR_SKY)
 	lda #(VRAM_CHR_SKY >> 12) << 4
 	sta a:$210B ; BG12NBA
 	lda #((VRAM_CHR_FG >> 13) | $20)
@@ -960,14 +961,15 @@ oamp_hex16_space:
 ; smul16:         s16 a *    s16 b =   32 p                clobbers A/X/Y                 ~770 clocks
 ; mul16t:          16 a *     16 b =   16 A/p (truncated)  clobbers A/X/Y                 ~500 clocks
 ; smul16f:       s8.8 a *   s8.8 b = s8.8 A = s16.16 p     clobbers A/X/Y                 ~920 clocks
-; smul32f_16f:  s24.8 a *   s8.8 b = s8.8 A =  s8.24 p     clobbers A/X/Y,a,b             ~2570 clocks (1.8 scanlines)
-; smul32ft:     s24.8 a * s16.16 b = s8.8 A = s16.24 r     clobbers A/X/Y,a,b,temp0-13    ~3600 clocks (2.6 scanlines)
+; smul32f_16f:  s24.8 a *   s8.8 b = s8.8 A =  s8.24 p     clobbers A/X/Y,a,b,r           ~2570 clocks (1.8 scanlines)
+; smul32ft:     s24.8 a * s16.16 b = s8.8 A = s16.24 r     clobbers A/X/Y,a,b,p,temp0-13  ~3600 clocks (2.6 scanlines)
 ;
 ; udiv32:         u32 a /    u32 b =  u32 p    % u32 r     clobbers A/X (DB any)          ~12400 clocks (9 scanlines)
-; recip16f:           1 /   s8.8 A = s8.8 A = s16.16 p     clobbers A/X,a,b (DB any)      ~12450 clocks
+; sdiv32          s32 a /    s32 b =  s32 p    % u32 r     clobbers A/X/Y (DB any)        ~14000 clocks (10 scanlines)
+; recip16f:           1 /   s8.8 A = s8.8 A = s16.16 p     clobbers A/X,a,b (DB any)      ~12450 clocks (9 scanlines)
 ;
 ; sign:         A = value, returns either 0 or $FFFF       preserves flags (.i8/.i16 allowed, DB any)
-; sincos:       A = angle 0-255, result in cosa/sina       clobbers A/X (DB any)
+; sincos:       A = angle 0-255, result in cosa/sina       clobbers A/X (i8/.i16 allowed, DB any)
 
 ; unsigned 16-bit multiply, 32-bit result
 ; Written by 93143: https://forums.nesdev.org/viewtopic.php?p=280089#p280089
@@ -1089,7 +1091,7 @@ smul16f: ; smul16 but returning the middle 16-bit value as A (i.e. 8.8 fixed poi
 	lda z:math_p+1
 	rts
 
-smul32f_16f: ; a = 24.8 fixed, b = 8.8 fixed, result in A = 8.8, clobbers: math_a/math_b
+smul32f_16f: ; a = 24.8 fixed, b = 8.8 fixed, result in A = 8.8, clobbers: math_a/math_b/math_r
 	; DB = 0
 	.a16
 	.i8
@@ -1132,7 +1134,7 @@ smul32f_16f: ; a = 24.8 fixed, b = 8.8 fixed, result in A = 8.8, clobbers: math_
 	lda z:math_p+2 ; result in upper bits
 	rts
 
-smul32ft: ; a = 24.8 fixed, b = 16.16 fixed, 16.24 result in math_r, returns 8.8 in A, clobbers math_a/b, temp0-13
+smul32ft: ; a = 24.8 fixed, b = 16.16 fixed, 16.24 result in math_r, returns 8.8 in A, clobbers math_a/b/p, temp0-13
 	; DB = 0
 	.a16
 	.i8
@@ -1250,6 +1252,54 @@ udiv32:
 	bne @loop
 	sta z:math_r+0
 	rts
+	; Optimization notes:
+	;   This routine is very simple and very slow.
+	;   We try to do it only a few times per frame, but it's still pretty hefty.
+	;   There is likely a way to decompose the operation to use the 16/8 hardware divider,
+	;   but I have not yet discovered one.
+
+sdiv32: ; 32-bit/32-bit signed division, 32+32 result, math_a / math_b = math_p & math_r, clobbers A/X/Y
+	ldy #0 ; y=1 marks an inverted result
+	lda z:math_a+2
+	bpl :+
+		iny
+		lda z:math_a+0
+		eor #$FFFF
+		clc
+		adc #1
+		sta z:math_a+0
+		lda z:math_a+2
+		eor #$FFFF
+		adc #0
+		sta z:math_a+2
+	:
+	lda z:math_b+2
+	bpl :+
+		iny
+		lda z:math_b+0
+		eor #$FFFF
+		clc
+		adc #1
+		sta z:math_b+0
+		lda z:math_b+2
+		eor #$FFFF
+		adc #0
+		sta z:math_b+2
+	:
+	jsr udiv32
+	cpy #1
+	bne :+
+		lda z:math_p+0
+		eor #$FFFF
+		clc
+		adc #1
+		sta z:math_p+0
+		lda z:math_p+2
+		eor #$FFFF
+		adc #0
+		sta z:math_b+2
+	:
+	rts
 
 ; fixed point reciprocal, clobbers A/X/Y/math_a/math_b/math_p/math_r
 recip16f: ; A = fixed point number, result in A
@@ -1284,9 +1334,14 @@ recip16f: ; A = fixed point number, result in A
 	:
 	lda z:math_p+1
 	rts
+	; Optimization notes:
+	;   See udiv32 notes above.
+	;   If not using the p+0 byte, this could be done a little faster with a udiv24,
+	;   but this demo needs p+0 for all uses.
 
 sign: ; A = value, returns either 0 or $FFFF, preserves flags
 	.a16
+	;.i any
 	php
 	cmp #$8000
 	bcs :+
@@ -1301,7 +1356,8 @@ sign: ; A = value, returns either 0 or $FFFF, preserves flags
 
 sincos: ; A = angle 0-255, result in cosa/sina, clobbers A/X
 	.a16
-	.i8
+	;.i any
+	php
 	rep #$10
 	.i16
 	asl
@@ -1315,8 +1371,7 @@ sincos: ; A = angle 0-255, result in cosa/sina, clobbers A/X
 	tax
 	lda f:sincos_table, X
 	sta z:sina
-	sep #$10
-	.i8
+	plp
 	rts
 
 sincos_table:
@@ -2036,12 +2091,15 @@ pv_rebuild:
 	stz z:math_a+0
 	lda z:pv_sh
 	beq :+
+		sta z:pv_sh_
 		sta z:math_a+2 ; a = (SH * 256) << 8
 		jsr udiv32
 		lda z:math_p+0
 		bra :++
 	:
 		lda #1<<8 ; SH = 0 means: SA = 1
+		lda z:math_b+1
+		sta z:pv_sh_ ; computed SH = (S0 * (L1-L0)) / 256
 	:
 	sta z:math_a ; SA = (SH * 256) / (S0 * (L1-L0))
 	; fetch sincos for rotation matrix
@@ -2049,6 +2107,15 @@ pv_rebuild:
 	ldx z:angle
 	txa
 	jsr sincos
+	; store m7t matrix (replaced by HDMA but used for other purposes like pv_texel_to_screen, and player moevement)
+	lda z:cosa
+	sta z:nmi_m7t+0 ; A = cos
+	sta z:nmi_m7t+6 ; D = cos
+	lda z:sina
+	sta z:nmi_m7t+2 ; B = sin
+	eor #$FFFF
+	inc
+	sta z:nmi_m7t+4 ; C = -sin
 	; check for negations, take abs of cosa/sina
 	; want: cos sin -sin cos, keep track of flips to recover from abs by negating afterwards
 	ldx #0
@@ -2458,6 +2525,8 @@ pv_abcd_lines_full_: ; full perspective with independent horizontal/vertical sca
 	;    offsetting the added time for a second hardware multiply. (FF6 does something like this.)
 	;    Not sure if extra bits of accuracy for A would help in any significant way, though.
 	;    I think the 8-bit Z result is the real bottleneck for precision.
+	;    Alternatively you could use a 16-bit Z result table (3.10 with its top 5 bits = 0)?
+	;    If both were 16-bit precision could definitely improve, at the expense of performance.
 
 pv_abcd_lines_sa1_: ; SA=1 means d=a and c=-b: ~1210 clocks per line
 	; temp+2/3 = un-interpolated scanline count
@@ -2654,6 +2723,8 @@ pv_interpolate_2x_: ; interpolate from every 2nd line to every line
 	rts
 
 pv_set_origin: ; Y = scanline to place posx/posy on the centre of
+	; Call this only after pv_rebuild has brought the perspective tables up to date.
+	; If you don't rotate or change the perspective, this can be reused many times to change the origin without having to use pv_rebuild again.
 	.a16
 	.i8
 	sty z:temp+0 ; temp+0 = target scanline
@@ -2717,6 +2788,183 @@ pv_set_origin: ; Y = scanline to place posx/posy on the centre of
 	adc #240
 	sta z:nmi_bg2vofs
 	rts
+
+pv_texel_to_screen: ; input: texelx,texely output screenx,screeny (pv_rebuild must be up to date)
+	.a16
+	.i8
+	; 1. translate to origin-relative position
+	lda z:texelx
+	sec
+	sbc z:nmi_m7x
+	sta z:screenx
+	lda z:texely
+	sec
+	sbc z:nmi_m7y
+	sta z:screeny
+	; 2. project into the rotated frustum
+	ldx z:pv_scale+1
+	bne @rotate
+	lda z:pv_negate
+	and #%1001
+	beq @rotate_end ; if b=0, assume c=0, and if a/d are not negated, angle=0
+	@rotate:
+		lda z:screenx
+		sta z:math_a
+		lda z:nmi_m7t+0
+		sta z:math_b
+		jsr smul16f ; X*A
+		pha ; X*A
+		lda z:nmi_m7t+2
+		sta z:math_b
+		jsr smul16f ; X*B
+		pha ; X*B, X*A
+		lda z:screeny
+		sta z:math_a
+		lda z:nmi_m7t+6
+		sta z:math_b
+		jsr smul16 ; Y*D
+		pla
+		clc
+		adc z:math_p+1
+		sta z:screeny ; sy = X*B + Y*D
+		lda z:nmi_m7t+4
+		sta z:math_b
+		jsr smul16 ; Y*C
+		pla
+		clc
+		adc z:math_p+1
+		sta z:screenx ; sx = X*A + Y*C
+	@rotate_end:
+	; translate Y to move 0 to the top of the screen, rather than the origin at the bottom
+	lda z:screeny
+	sec
+	sbc z:pv_sh_
+	sta z:screeny
+	; 3. try wrapping if outside the rectangular bounds of the frustum (S0 wide, SH tall)
+	ldx z:pv_wrap
+	beq @wrap_end
+		lda z:screenx
+		bmi @wrap_xm
+			lda z:pv_s0
+			lsr
+			cmp z:screenx
+			bcs @wrap_x_end ; s0/2 >= X, already in range
+			lda z:screenx
+			sec
+			sbc #1024
+			sta z:screenx ; try X-1024
+			bra @wrap_x_end
+		@wrap_xm:
+			lda z:pv_s0
+			lsr
+			eor #$FFFF
+			;inc
+			cmp z:screenx
+			bcc @wrap_x_end ; -s0/2 <= X, already in range
+			lda z:screenx
+			clc
+			adc #1024
+			sta z:screenx ; try X+1024
+			;bra @wrap_y
+		@wrap_x_end:
+		lda z:screeny
+		bmi @wrap_ym
+			cmp z:pv_sh_
+			bcc @wrap_end
+			lda z:screeny
+			sec
+			sbc #1024
+			sta z:screeny ; try Y-1024
+			bra @wrap_end
+		@wrap_ym:
+			; <0 is above the horizon
+			;lda z:screeny
+			clc
+			adc #1024
+			sta z:screeny ; try Y+1024
+			;bra @wrap_end
+		;
+	@wrap_end:
+	; 4. transform Y to scanline
+	;
+	; Interpolating Y from 0 to SH with perspective correction:
+	;   t = (scanline - L0) / (L1-L0)
+	;   Y = lerp(0/S0,SH/S1,t) / lerp(1/S0,1/S1,t)
+	; Inverting this calculation to find scanline from Y:
+	;   scanline = (Y * S1 * (L1-L0)) / ((S0 * SH) - Y * (S0 - S1))
+	;
+	lda z:screeny
+	sta z:math_a
+	lda z:pv_s1
+	sta z:math_b
+	jsr smul16
+	lda z:math_p+0
+	sta z:math_a+0
+	lda z:math_p+2
+	sta z:math_a+2 ; Y * S1
+	lda z:pv_l1
+	sec
+	sbc z:pv_l0
+	and #$00FF
+	sta z:math_b
+	jsr smul32f_16f
+	lda z:math_p+0
+	sta z:temp+0
+	lda z:math_p+2
+	sta z:temp+2 ; Y * S1 * (L1-L0)
+	lda z:pv_s0
+	sta z:math_a
+	lda z:pv_sh_
+	sta z:math_b
+	jsr umul16
+	lda z:math_p+0
+	sta z:temp+4
+	lda z:math_p+2
+	sta z:temp+6 ; S0 * SH
+	lda z:screeny
+	sta z:math_a
+	lda z:pv_s0
+	sec
+	sbc z:pv_s1
+	sta z:math_b
+	jsr smul16 ; Y * (S0 - S1)
+	lda z:temp+4
+	sec
+	sbc z:math_p+0
+	sta z:math_b+0
+	lda z:temp+6
+	sbc z:math_p+2
+	sta z:math_b+2 ; (S0 * SH) - Y * (S0 - S1)
+	lda z:temp+0
+	sta z:math_a+0
+	lda z:temp+2
+	sta z:math_a+2
+	jsr sdiv32
+	lda z:math_p+0
+	bpl :+
+	@offscreen: ; just return a very large screeny to indicate offscreen
+		lda #$5FFF
+		sta z:screeny
+		rts
+	:
+	lda z:pv_l0
+	and #$00FF
+	clc
+	adc z:math_p+0
+	sta z:screeny
+	lda z:pv_l1
+	and #$00FF
+	dec
+	cmp z:screeny
+	bcc @offscreen
+	; screeny is now correct
+	; math_p+0 = screeny - L0
+	; TODO how do we apply the appropriate X scale?
+	; HACK
+	lda #128
+	sta z:screenx
+	rts
+
 
 ;
 ; =============================================================================
@@ -2806,7 +3054,7 @@ print_stats_pv:
 	jsr oamp_hex16_space
 	lda z:pv_s1
 	jsr oamp_hex16_space
-	lda z:pv_sh
+	lda z:pv_sh_
 	jsr oamp_hex16
 	jmp oamp_return
 
@@ -3055,6 +3303,9 @@ mode_b:
 ; - Player moves only orthogonally
 ; - L/R adjusts tilt amount
 ;
+; A little bit simpler than the full rotating perspective plane (mode Y).
+; Without rotation, the computation is less expensive, and only needs to be updated when you change the tilt.
+;
 
 MODE_X_SX = 128
 MODE_X_SY = 112
@@ -3075,8 +3326,10 @@ set_mode_x:
 	stx z:tilt_last ; cause rebuild
 	stz z:posx+2
 	stz z:posy+2
-	ldx #00
+	ldx #$00
 	stx z:player_tile ; face left
+	ldx #1
+	stx z:pv_wrap ; wrapping world
 	jsr oam_sprite_clear
 mode_x:
 	lda z:gamepad
@@ -3192,12 +3445,17 @@ mode_x:
 	and #$00FF
 	ldx #0
 	jsr oam_sprite
-	; TODO world to screen transform triangle demo
-	; TODO simplified world to pixel calculation with no rotation?
-	;jsr texel_to_screen
-	;ldx #4
-	;lda #$8C ; arrow
+	; demonstrate texel to screen mapping
+	lda #MODE_A_TX
+	sta z:texelx
+	lda #MODE_A_TY
+	sta z:texely
+	; TODO
+	;jsr pv_texel_to_screen
+	ldx #4
+	lda #$8C ; arrow
 	;jsr oam_sprite
+	; print stats
 	jmp print_stats_pv
 
 ;
@@ -3224,11 +3482,29 @@ set_mode_y:
 	stx z:nmi_cgadsub ; enable additive blend on BG1 +BG2 + backdrop
 	ldx #1
 	stx z:nmi_bgmode
+	stx z:pv_wrap
 	ldy #$80
 	sty z:player_tile ; facing down
 	ldy #64
 	sty z:height ; halfway up
 mode_y:
+	; L/R = up/down
+	ldx z:height
+	lda z:gamepad
+	and #$0010 ; R for up
+	beq :+
+		cpx #127
+		bcs :+
+		inx
+	:
+	lda z:gamepad
+	and #$0020 ; L for down
+	beq :+
+		cpx #1
+		bcc :+
+		dex
+	:
+	stx z:height
 	; rotate with left/right
 	ldx z:angle
 	lda z:gamepad
@@ -3242,20 +3518,36 @@ mode_y:
 		dex
 	:
 	stx z:angle
-	; rebuild rotation matrix
+	; generate perspective
+	; --------------------
+	; set horizon
+	lda z:height
+	and #$00FF
+	lsr
+	clc
+	adc #32
+	tax
+	sta z:pv_l0 ; l0 = 32+(height/2)  [32-96]
+	ldx #224
+	stx z:pv_l1
+	; set view scale
+	lda z:height
+	and #$00FF
+	asl
+	clc
+	adc #384
+	sta z:pv_s0 ; 384 + (height*2)    [384-640]
+	lda z:height
+	and #$00FF
+	lsr
+	adc #64
+	sta z:pv_s1 ; 64 + (height/2)     [64-128]
 	lda #0
-	ldx z:angle
-	txa
-	jsr sincos
-	lda z:cosa
-	sta z:nmi_m7t+0 ; A = cos
-	sta z:nmi_m7t+6 ; D = cos
-	lda z:sina
-	sta z:nmi_m7t+2 ; B = sin
-	eor #$FFFF
-	inc
-	sta z:nmi_m7t+4 ; C = -sin
-	; up/down moves player
+	sta z:pv_sh ; dependent-vertical scale
+	ldx #2
+	stx z:pv_interp ; 2x interpolation
+	jsr pv_rebuild
+	; up/down moves player (depends on generated rotation matrix)
 	lda z:gamepad
 	and #$0400 ; down
 	beq :+
@@ -3320,23 +3612,6 @@ mode_y:
 		and #$0003
 		sta z:posy+3
 	:
-	; L/R = up/down
-	ldx z:height
-	lda z:gamepad
-	and #$0010 ; R for up
-	beq :+
-		cpx #127
-		bcs :+
-		inx
-	:
-	lda z:gamepad
-	and #$0020 ; L for down
-	beq :+
-		cpx #1
-		bcc :+
-		dex
-	:
-	stx z:height
 	; select to reset position (since aspect ratio can't do anything in sh=0)
 	lda z:newpad
 	and #$2000 ; select
@@ -3350,35 +3625,7 @@ mode_y:
 		ldx #0
 		stx z:angle
 	:
-	; generate perspective
-	; --------------------
-	; set horizon
-	lda z:height
-	and #$00FF
-	lsr
-	clc
-	adc #32
-	tax
-	sta z:pv_l0 ; l0 = 32+(height/2)  [32-96]
-	ldx #224
-	stx z:pv_l1
-	; set view scale
-	lda z:height
-	and #$00FF
-	asl
-	clc
-	adc #384
-	sta z:pv_s0 ; 384 + (height*2)    [384-640]
-	lda z:height
-	and #$00FF
-	lsr
-	adc #64
-	sta z:pv_s1 ; 64 + (height/2)     [64-128]
-	lda #0
-	sta z:pv_sh ; dependent-vertical scale
-	ldx #2
-	stx z:pv_interp ; 2x interpolation
-	jsr pv_rebuild
+	; set origin
 	ldy #MODE_Y_SY ; place focus at centre of scanline SY
 	jsr pv_set_origin
 	; animate and draw sprites and stats
@@ -3404,10 +3651,15 @@ mode_y:
 	ora z:player_tile
 	and #$00FF
 	jsr oam_sprite
-	; TODO world to screen transform triangle demo
-	;jsr texel_to_screen
-	;ldx #4
-	;lda #$8C ; arrow
+	; demonstrate texel to screen mapping
+	lda #MODE_A_TX
+	sta z:texelx
+	lda #MODE_A_TY
+	sta z:texely
+	; TODO
+	;jsr pv_texel_to_screen
+	ldx #4
+	lda #$8C ; arrow
 	;jsr oam_sprite
 	; shadow at focus
 	lda #MODE_Y_SX
