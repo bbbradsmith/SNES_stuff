@@ -2887,13 +2887,26 @@ pv_texel_to_screen: ; input: texelx,texely output screenx,screeny (pv_rebuild mu
 	@wrap_end:
 	; 4. transform Y to scanline
 	;
-	; Interpolating Y from 0 to SH with perspective correction:
+	; Interpolating Y from 0 to SH with perspective correction gives the relationship between Y in frustum-texel-space and scanlines:
 	;   t = (scanline - L0) / (L1-L0)
 	;   Y = lerp(0/S0,SH/S1,t) / lerp(1/S0,1/S1,t)
 	; Inverting this calculation to find scanline from Y:
-	;   scanline = (Y * S1 * (L1-L0)) / ((S0 * SH) - Y * (S0 - S1))
+	;   (scanline - L0) = (Y * S1 * (L1-L0)) / ((S0 * SH) - Y * (S0 - S1))
+	;
+	; X must be rescaled by a factor of S0-to-S1 / 256, interpolating linearly with Y:
+	;   screenx = X / lerp(S0/256,S1/256,Y/SH)
+	; This becomes a division by the same factor as with Y:
+	;   screenx = (X * SH * 256) / ((S0 * SH) - Y * (S0 - S1))
 	;
 	lda z:screeny
+	bmi @offscreen
+	cmp z:pv_sh_
+	bcc :+
+	@offscreen: ; just return a very large screeny to indicate offscreen
+		lda #$5FFF
+		sta z:screeny
+		rts
+	:
 	sta z:math_a
 	lda z:pv_s1
 	sta z:math_b
@@ -2931,40 +2944,44 @@ pv_texel_to_screen: ; input: texelx,texely output screenx,screeny (pv_rebuild mu
 	lda z:temp+4
 	sec
 	sbc z:math_p+0
+	sta z:temp+4
 	sta z:math_b+0
 	lda z:temp+6
 	sbc z:math_p+2
 	sta z:math_b+2 ; (S0 * SH) - Y * (S0 - S1)
+	sta z:temp+6
 	lda z:temp+0
 	sta z:math_a+0
 	lda z:temp+2
 	sta z:math_a+2
-	jsr sdiv32
-	lda z:math_p+0
-	bpl :+
-	@offscreen: ; just return a very large screeny to indicate offscreen
-		lda #$5FFF
-		sta z:screeny
-		rts
-	:
+	jsr sdiv32 ; (Y * S1 * (L1-L0)) / ((S0 * SH) - Y * (S0 - S1))
 	lda z:pv_l0
 	and #$00FF
 	clc
 	adc z:math_p+0
-	sta z:screeny
-	lda z:pv_l1
-	and #$00FF
-	dec
-	cmp z:screeny
-	bcc @offscreen
-	; screeny is now correct
-	; math_p+0 = screeny - L0
-	; TODO how do we apply the appropriate X scale?
-	; HACK
-	lda #160
+	sta z:screeny ; screeny is now correct
+	; screenx
+	lda z:pv_sh_
+	sta z:math_a
+	lda z:screenx
+	sta z:math_b
+	jsr smul16 ; X * SH
+	stz z:math_a
+	lda z:math_p+0
+	sta z:math_a+1
+	ldx z:math_p+2
+	stx z:math_a+3 ; X * SH * 256
+	lda z:temp+4
+	sta z:math_b+0
+	lda z:temp+6
+	sta z:math_b+2 ; (S0 * SH) - Y * (S0 - S1)
+	jsr sdiv32 ; (X * SH * 256) / ((S0 * SH) - Y * (S0 - S1))
+	lda z:math_p+0
+	clc
+	adc #128
 	sta z:screenx
+	; NOTE: could probably only do 1 division (1 / the shared denominator) and then 2 multiplies.
 	rts
-
 
 ;
 ; =============================================================================
