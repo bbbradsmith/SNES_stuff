@@ -93,6 +93,7 @@ at the same framerates.
 The perspective view maps a trapezoid from the tilemap texture to the screen.
 This defines a view frustum in terms of **S0**, **S1**, **SH**, an origin point, and a rotation angle.
 Diagram:
+
 ![trapezoid viewing frustum on the texture map](frustum.png)
 
 Some useful links:
