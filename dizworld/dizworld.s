@@ -2973,6 +2973,10 @@ pv_texel_to_screen: ; input: texelx,texely output screenx,screeny (pv_rebuild mu
 	sta z:screenx
 	; NOTE: could probably only do 1 division (1 / the shared denominator) and then 2 multiplies.
 	rts
+	; Optimization note:
+	;   Should probably do 1 division (1 / the shared denominator) and then 2 multiplies, since udiv32/sdiv32 is so slow,
+	;   and overlapped hardware multiplies can probably do it faster? This function could probably be made a lot leaner,
+	;   but ultimately if we need to do many of these per frame a more efficient alternative route may be needed.
 
 ;
 ; =============================================================================
@@ -3066,6 +3070,18 @@ print_stats_pv:
 	jsr oamp_hex16
 	jmp oamp_return
 
+
+;
+; =============================================================================
+; "Pin" demonstrating a texel to screen mapping
+;
+
+; texel coordinate of screen-sprite
+PIN_TX = 280 ; entrance to forest
+PIN_TY = 115
+;PIN_TX = 807 ; tip of 7 in "MODE 7" (accuracy declines with distance from Px)
+;PIN_TY = 645
+
 ;
 ; =============================================================================
 ; Mode A test "Overhead, simple"
@@ -3082,12 +3098,6 @@ print_stats_pv:
 ; pivot point for centre of the spin
 MODE_A_PX = 152
 MODE_A_PY = 120
-
-; texel coordinate of screen-sprite
-MODE_A_TX = 280 ; entrance to forest
-MODE_A_TY = 115
-;MODE_A_TX = 807 ; tip of 7 in "MODE 7" (accuracy declines with distance from Px)
-;MODE_A_TY = 645
 
 set_mode_a:
 	.a16
@@ -3120,9 +3130,9 @@ mode_a:
 	jsr simple_scroll
 	; sprite pinned to tilemap
 	jsr calc_det_r
-	lda #MODE_A_TX
+	lda #PIN_TX
 	sta z:texelx
-	lda #MODE_A_TY
+	lda #PIN_TY
 	sta z:texely
 	jsr texel_to_screen
 	ldx #0
@@ -3293,9 +3303,9 @@ mode_b:
 	jsr oam_sprite
 	; sprite pinned to tilemap
 	jsr calc_det_r
-	lda #MODE_A_TX
+	lda #PIN_TX
 	sta z:texelx
-	lda #MODE_A_TY
+	lda #PIN_TY
 	sta z:texely
 	jsr texel_to_screen
 	ldx #4
@@ -3327,7 +3337,8 @@ set_mode_x:
 	ldx #0
 	stx z:new_hdma_en
 	stx z:angle
-	stx z:pv_interp
+	ldx #2
+	stx z:pv_interp ; 2x interpolation
 	ldx #64
 	stx z:tilt
 	inx
@@ -3454,9 +3465,9 @@ mode_x:
 	ldx #0
 	jsr oam_sprite
 	; demonstrate texel to screen mapping
-	lda #MODE_A_TX
+	lda #PIN_TX
 	sta z:texelx
-	lda #MODE_A_TY
+	lda #PIN_TY
 	sta z:texely
 	jsr pv_texel_to_screen
 	ldx #4
@@ -3659,9 +3670,9 @@ mode_y:
 	and #$00FF
 	jsr oam_sprite
 	; demonstrate texel to screen mapping
-	lda #MODE_A_TX
+	lda #PIN_TX
 	sta z:texelx
-	lda #MODE_A_TY
+	lda #PIN_TY
 	sta z:texely
 	jsr pv_texel_to_screen
 	ldx #4
