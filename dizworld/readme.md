@@ -92,9 +92,10 @@ at the same framerates.
 
 The perspective view maps a trapezoid from the tilemap texture to the screen.
 This defines a view frustum in terms of **S0**, **S1**, **SH**, an origin point, and a rotation angle.
-Diagram:
+Diagram and its approximate in-game view:
 
 ![trapezoid viewing frustum on the texture map](frustum.png)
+![approximate in-game view of the frustim](frustum_view.png)
 
 Some useful links:
 * [NovaSquirrel Mode 7 Previewer](https://novasquirrel.github.io/Mode7Preview/) - an excellent webpage tool allowing you to write a javascipt program to generate a Mode 7 view per-scanline.
