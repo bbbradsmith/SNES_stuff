@@ -126,12 +126,11 @@ This program was written by Brad Smith.
 Its source code is made freely available under the the terms of the Creative Commons Attribution license:
 [CC BY 4.0](ttps://creativecommons.org/licenses/by/4.0/)
 
-You may reuse and modify this code as long as you give credit to its origin.
+This means that you may reuse and modify this code as long as you give credit to its original author.
 
-The visual art incorporated in this demo came from several authors under other
-Creative Commons licenses. These were all sourced from
+The visual art incorporated in this demo came from several authors under Creative Commons licenses. These were all sourced from
 [OpenGameArt.org](https://opengameart.org/):
 
-* **16x16 Forest Tiles by Sharm**: [OpenGameArt: 16x16-forest-tiles](https://opengameart.org/content/16x16-forest-tiles)
-* **Ocean Background by KnoblePersona**: [OpenGameArt: ocean-background](https://opengameart.org/content/ocean-background)
-* **LPC Birds by bluecarrot16**: [OpenGameArt: lpc-birds](https://opengameart.org/content/lpc-birds)
+* **16x16 Forest Tiles by Sharm**: [OpenGameArt: 16x16-forest-tiles](https://opengameart.org/content/16x16-forest-tiles) (CC BY 4.0)
+* **Ocean Background by KnoblePersona**: [OpenGameArt: ocean-background](https://opengameart.org/content/ocean-background) (CC BY 3.0)
+* **LPC Birds by bluecarrot16**: [OpenGameArt: lpc-birds](https://opengameart.org/content/lpc-birds) (CC BY 4.0)
