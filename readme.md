@@ -1,19 +1,16 @@
 # SNES Stuff
 
-Just a random collection of small SNES programs. Demonstrations and experiments.
+A collection of small SNES programs. Demonstrations and experiments.
+
+Website: [rainwarrior.ca](https://rainwarrior.ca)
+
+Patreon: [rainwarrior](https://patreon.com/rainwarrior)
 
 ## Demos
 
-* **[elasticity](elasticity)** (2022-05-05)
-  * Demonstration of high colour graphics.
-  * ROM: [elasticity.sfc](../../raw/main/elasticity/elasticity.sfc)
-
-* **[twoship](twoship)** (2022-05-19)
-  * Demonstration of high resolution Mode 5 graphics.
-  * ROM: [twoship.sfc](../../raw/main/twoship/twoship.sfc)
-
-* **[dizworld](dizworld)** (work in progress)
+* **[dizworld](dizworld)** (2022-08-17)
   * Demonstration of practical uses for Mode 7 graphics
+  * ROM [dizworld.sfc](../../raw/main/dizworld/dizworld.sfc)
 
 * **[multest](multest)** (2022-06-06)
   * Test of hardware multiply/divide algorithms
@@ -23,3 +20,11 @@ Just a random collection of small SNES programs. Demonstrations and experiments.
 * **[extbgtest](extbgtest)** (2022-06-06)
   * Test of Mode 7 EXTBG
   * ROM: [extbgtest.sfc](../../raw/main/extbgtest/extbgtest.sfc)
+
+* **[twoship](twoship)** (2022-05-19)
+  * Demonstration of high resolution Mode 5 graphics.
+  * ROM: [twoship.sfc](../../raw/main/twoship/twoship.sfc)
+
+* **[elasticity](elasticity)** (2022-05-05)
+  * Demonstration of high colour graphics.
+  * ROM: [elasticity.sfc](../../raw/main/elasticity/elasticity.sfc)

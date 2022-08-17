@@ -101,7 +101,7 @@ texely:       .res 2
 screenx:      .res 2
 screeny:      .res 2
 
-nmi_bgmode:   .res 1
+nmi_bgmode:   .res 1 ; hardware settings applied when nmi_ready
 nmi_hofs:     .res 2
 nmi_vofs:     .res 2
 nmi_m7t:      .res 8
@@ -1650,7 +1650,44 @@ simple_rot_scale: ; LR shoulder = scale adjust, build ABCD from angle/scale
 ; =============================================================================
 ; Perspective View
 ;
-
+; Overview:
+;   Parameters
+;     angle (u8) - determines the direction of view, specified in 256ths of a circle
+;     pv_l0 (u8) - the vertical line of output picture where the view begins (horizon), 0 for top of screen
+;     pv_l1 (u8) - the vertical line where the view stops (usually 224)
+;     pv_s0 (u16) - the horizontal width of the view in texels on the texure map at L0 (256 = 1:1 scale, max < 1024)
+;     pv_s1 (u16) - the horizontal width at L1, S1 should be <= S0
+;     pv_sh (u16) - the vertical height of the view in texels on the texture map, use 0 for "automatic" (fast), L1-L0 = 1:1 scale
+;     pv_interp (u8) - values of 2 or 4 give 2x or 4x vertical interpolation (faster calculation, less accurate), other values disable interpolation
+;     pv_wrap (u8) - 1 if pv_texel_to_world coordinates need to wrap
+;
+; L0 to L1 defines the area of the screen to be covered by the perspective effect.
+; S0, S1, and SH are the top, bottom, and height of a trapezoid view frustum, this is an area on the 1024x1024 mode 7 texture map that will be visible in this perspective
+;
+; Calculation overview:
+;   Creating a correct perspective involves a "Z" factor which is proportional to your distance from a point on the plane.
+;   The scale of Z is arbitrary as long as the Z for the bottom is the right ratio to the Z at the top.
+;   For our perspective, Z at the top is proportional to S0, and Z at the bottom is proportional to S1.
+;   Across the vertical space of the picture, Z does not interpolate linearly. However, its reciprocal 1/Z does.
+;   We can linearly interpolate this reciprocal 1/Z and then invert it to recover a perspective correct Z for each line.
+;     Useful reference: https://en.wikipedia.org/wiki/Texture_mapping#Perspective_correctness
+;
+;   This calculation is used to generate a set of scalings of the Mode 7 ABCD matrix for each line of the picture, to be updated by HDMA.
+;   Setup:
+;     ZR0 = 1/S0
+;     ZR1 = 1/S1
+;     SA = (256 * SH) / (S0 * (L1 - L0)), or SA = 1 if automatic (SH=0)
+;   Per-line:
+;     zr = lerp(ZR0,ZR1,(line-L0)/(L1-L0))
+;     z = 1 / zr
+;     a = z *  cos(angle)
+;     b = z *  sin(angle) * SA
+;     c = z * -sin(angle)
+;     d = z *  cos(angle) * SA
+;
+;   Note that the above is an idealized version of the computation. It might be usable as-is on a CPU with floating point operations,
+;   but the actual SNES computation will involved fixed point numbers with carefully chosen scales. More details in the code below.
+;
 ; Configuration and performance:
 ;   There are 3 versions of the perspective generator which take increasing CPU time:
 ;     1. angle=0:  No rotation of the view.
@@ -1948,7 +1985,7 @@ pv_rebuild:
 	stz a:pv_hdma_col0+3, X ; end of table
 	; 4. calculate ABCD
 	; =================
-	; overview of calculation:
+	; Overview of calculation:
 	;   Interpolating from S0 to S1 texel scales, with perspective correction,
 	;   meaning that for Z proportional to S0/S1, 1/Z interpolates linearly down the screen.
 	;   So: 1/Z is interpolated, and used to recover the corrected Z.
@@ -1960,11 +1997,11 @@ pv_rebuild:
 	;     If SH=0 then SA will be forced to 1, allowing more efficient computation but SH will automatically have the same texel scale as S0.
 	;   - L0<L1, L1<254 (L1 should probably always be 224)
 	;
-	; setup:
+	; Setup:
 	;   ZR0 = (1<<21)/S0              ; 11.21 / 8.8 (S0) = 19.13, truncated to 3.13
 	;   ZR1 = (1<<21)/S1
 	;   SA = (256 * SH) / (S0 * (L1 - L0)) ; pre-combined with rotation cos/sin at 1.7
-	; per line:
+	; Per-line:
 	;   zr = >lerp(ZR0,ZR1)>>4        ; 3.9 (truncated from 3.13)
 	;   z = <((1<<15)/zr)             ; 1.15 / 3.9 = 10.6, clamped to 2.6
 	;   a = z *  cos(angle)      >> 5 ; 2.6 * 1.7 (cos>>1)    = 3.13 >> 5 = 8.8
@@ -2688,6 +2725,8 @@ pv_interpolate_4x_: ; interpolate from every 4th line to every 2nd line
 	asl
 	sta temp+2 ; reload counter for twice as many lines at 2x interpolation
 	;jmp pv_interpolate_2x_
+	; fall through
+
 pv_interpolate_2x_: ; interpolate from every 2nd line to every line
 	.a16
 	.i16
@@ -2977,6 +3016,8 @@ pv_texel_to_screen: ; input: texelx,texely output screenx,screeny (pv_rebuild mu
 	;   Should probably do 1 division (1 / the shared denominator) and then 2 multiplies, since udiv32/sdiv32 is so slow,
 	;   and overlapped hardware multiplies can probably do it faster? This function could probably be made a lot leaner,
 	;   but ultimately if we need to do many of these per frame a more efficient alternative route may be needed.
+	;   For example: if we only need to rotate, but don't change other parameters, we could create a lookup table with SH entries,
+	;   mapping every Y to a screeny, and providing a scaling factor for every X. (e.g. F-Zero doesn't change perspective during a race.)
 
 ;
 ; =============================================================================
@@ -3321,7 +3362,7 @@ mode_b:
 ; - Player moves only orthogonally
 ; - L/R adjusts tilt amount
 ;
-; A little bit simpler than the full rotating perspective plane (mode Y).
+; A little bit simpler than the full rotating perspective plane (mode Y below).
 ; Without rotation, the computation is less expensive, and only needs to be updated when you change the tilt.
 ;
 
