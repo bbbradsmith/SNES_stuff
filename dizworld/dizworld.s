@@ -2837,8 +2837,8 @@ pv_texel_to_screen: ; input: texelx,texely output screenx,screeny (pv_rebuild mu
 	@rotate_end:
 	; translate Y to move 0 to the top of the screen, rather than the origin at the bottom
 	lda z:screeny
-	sec
-	sbc z:pv_sh_
+	clc
+	adc z:pv_sh_
 	sta z:screeny
 	; 3. try wrapping if outside the rectangular bounds of the frustum (S0 wide, SH tall)
 	ldx z:pv_wrap
@@ -2961,7 +2961,7 @@ pv_texel_to_screen: ; input: texelx,texely output screenx,screeny (pv_rebuild mu
 	; math_p+0 = screeny - L0
 	; TODO how do we apply the appropriate X scale?
 	; HACK
-	lda #128
+	lda #160
 	sta z:screenx
 	rts
 
@@ -3450,11 +3450,10 @@ mode_x:
 	sta z:texelx
 	lda #MODE_A_TY
 	sta z:texely
-	; TODO
-	;jsr pv_texel_to_screen
+	jsr pv_texel_to_screen
 	ldx #4
 	lda #$8C ; arrow
-	;jsr oam_sprite
+	jsr oam_sprite
 	; print stats
 	jmp print_stats_pv
 
@@ -3656,11 +3655,10 @@ mode_y:
 	sta z:texelx
 	lda #MODE_A_TY
 	sta z:texely
-	; TODO
-	;jsr pv_texel_to_screen
+	jsr pv_texel_to_screen
 	ldx #4
 	lda #$8C ; arrow
-	;jsr oam_sprite
+	jsr oam_sprite
 	; shadow at focus
 	lda #MODE_Y_SX
 	sta z:screenx
