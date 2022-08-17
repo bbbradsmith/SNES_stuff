@@ -6,6 +6,10 @@ I wanted to show how these are written, and provide example code for anyone that
 If you find it helpful, please feel free to build on it, and let me know if you make anything cool.
 (See license below.)
 
+Website: [rainwarrior.ca](https://rainwarrior.ca)
+
+Patreon: [rainwarrior](https://patreon.com/rainwarrior)
+
 ## Demos
 
 There are 4 demonstrations, selected by the 4 buttons A, B, X, Y.
