@@ -6,11 +6,9 @@ I wanted to show how these are written, and provide example code for anyone that
 If you find it helpful, please feel free to build on it, and let me know if you make anything cool.
 (See license below.)
 
-ROM: [dizworld.sfc](../../../raw/main/dizworld/dizworld.sfc)
-
-Website: [rainwarrior.ca](https://rainwarrior.ca)
-
-Patreon: [rainwarrior](https://patreon.com/rainwarrior)
+* ROM: [dizworld.sfc](../../../raw/main/dizworld/dizworld.sfc)
+* Website: [rainwarrior.ca](https://rainwarrior.ca)
+* Patreon: [rainwarrior](https://patreon.com/rainwarrior)
 
 ## Demos
 
