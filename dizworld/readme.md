@@ -90,6 +90,11 @@ The basic SNES is still fully capable of doing these calculations, but at higher
 so it might be difficult to have as many 3D-positioned sprites as those games did,
 at the same framerates.
 
+The perspective view maps a trapezoid from the tilemap texture to the screen.
+This defines a view frustum in terms of **S0**, **S1**, **SH**, an origin point, and a rotation angle.
+Diagram:
+![trapezoid viewing frustum on the texture map](frustum.png)
+
 Some useful links:
 * [NovaSquirrel Mode 7 Previewer](https://novasquirrel.github.io/Mode7Preview/) - an excellent webpage tool allowing you to write a javascipt program to generate a Mode 7 view per-scanline.
 * [Telinc1 Mode 7 Simulator](https://telinc1.github.io/mode7/) - a simpler webpage tool showing more directly how the Mode 7 registers operate.
