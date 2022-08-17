@@ -2,9 +2,14 @@
 
 This is a demonstration of how to do a few practical Mode 7 effects for the SNES.
 
+I wanted to show how these are written, and provide example code for anyone that could use it.
+If you find it helpful, please feel free to build on it, and let me know if you make anything cool.
+(See license below.)
+
 ## Demos
 
 There are 4 demonstrations, selected by the 4 buttons A, B, X, Y.
+It will start in demo Y by default.
 
 * **A**, **B**, **X**, **Y** - select demo
 * **START** - toggle stats
@@ -82,10 +87,10 @@ so it might be difficult to have as many 3D-positioned sprites as those games di
 at the same framerates.
 
 Some useful links:
-* [NovaSquirrel Mode 7 Previewer](https://novasquirrel.github.io/Mode7Preview/) - an excellent webpage tool allowing you to write a javascipt program to generate a Mode 7 view per-scanline
-* [Telinc1 Mode 7 Simulator](https://telinc1.github.io/mode7/) - a simpler webpage tool showing more directly how the Mode 7 registers operate
-* [Kulor's Guide to Mode 7 Perspective Planes](https://forums.nesdev.org/viewtopic.php?t=24053) - a recent forum thread with fertile discussion about how to create Mode 7 perspective effects
-* [Wikipedia: Texture mapping - Perspective correctness](https://en.wikipedia.org/wiki/Texture_mapping#Perspective_correctness) - a good description of the perspective correction calculation
+* [NovaSquirrel Mode 7 Previewer](https://novasquirrel.github.io/Mode7Preview/) - an excellent webpage tool allowing you to write a javascipt program to generate a Mode 7 view per-scanline.
+* [Telinc1 Mode 7 Simulator](https://telinc1.github.io/mode7/) - a simpler webpage tool showing more directly how the Mode 7 registers operate.
+* [Kulor's Guide to Mode 7 Perspective Planes](https://forums.nesdev.org/viewtopic.php?t=24053) - a recent forum thread with fertile discussion about how to create Mode 7 perspective effects.
+* [Wikipedia: Texture mapping - Perspective correctness](https://en.wikipedia.org/wiki/Texture_mapping#Perspective_correctness) - a description of the perspective correction calculation.
 
 ## Build
 
@@ -98,22 +103,24 @@ Some useful links:
 
 The source graphics are PNG images. These can be rebuilt into SNES data by the **gfx.py** python script.
 
+The **dizworld.png** image was created with the free
+[Tiled](https://www.mapeditor.org/) map editor.
+The map source for that image is **dizworld.tmx**.
+The PNG file does not need to be made with Tiled, but since Mode 7 maps are made of 8x8 tiles,
+it was helpful for laying it out, and making sure we didn't exceed the limit of 256 unique tiles.
+
 ## License
 
 This program was written by Brad Smith.
 Its source code is made freely available under the the terms of the Creative Commons Attribution license:
-https://creativecommons.org/licenses/by/4.0/
+[CC BY 4.0](ttps://creativecommons.org/licenses/by/4.0/)
 
 You may reuse and modify this code as long as you give credit to its origin.
 
-The visual art incorporated in this demo came from several authors and has its own similar license.
-From OpenGameArt.org with Creative Commons license:
+The visual art incorporated in this demo came from several authors under other
+Creative Commons licenses. These were all sourced from
+[OpenGameArt.org](https://opengameart.org/):
 
-* **16x16 Forest Tiles by Sharm**
-  * [OpenGameArt: 16x16-forest-tiles](https://opengameart.org/content/16x16-forest-tiles)
-
-* **Ocean Background by KnoblePersona**
-  * [OpenGameArt: ocean-background](https://opengameart.org/content/ocean-background)
-
-* **LPC Birds by bluecarrot16**
-  * [lpc-birds](https://opengameart.org/content/lpc-birds)
+* **16x16 Forest Tiles by Sharm**: [OpenGameArt: 16x16-forest-tiles](https://opengameart.org/content/16x16-forest-tiles)
+* **Ocean Background by KnoblePersona**: [OpenGameArt: ocean-background](https://opengameart.org/content/ocean-background)
+* **LPC Birds by bluecarrot16**: [OpenGameArt: lpc-birds](https://opengameart.org/content/lpc-birds)
