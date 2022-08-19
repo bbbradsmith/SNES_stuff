@@ -1,5 +1,23 @@
 # Dizworld
 
+**_________________________________**
+**_____ 16-bit Precision Test _____**
+**_________________________________**
+
+This branch is a test of using 16-bit precision instead of 8-bit for the
+inner-loop multiply. It is significantly slower than the original version,
+but there is some noticeable but minor precision improvments.
+
+This might be worthwhile if you don't mind running at 30fps instead of 60.
+Take a look at dizworld.s for more notes, and the change history for information
+about how this was applied. Otherwise you can download the ROM from this branch
+to see how it looks.
+
+The most dramatic difference is where the extra precision prevents clamping in
+the demo X tilt and allows a wider value of SH.
+
+** Original documentation follows: **
+
 This is a demonstration of how to do a few practical Mode 7 effects for the SNES.
 
 I wanted to show how these are written, and provide example code for anyone that could use it.
