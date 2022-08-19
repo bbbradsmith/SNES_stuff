@@ -2469,7 +2469,6 @@ pv_abcd_lines_full_: ; full perspective with independent horizontal/vertical sca
 	tax ; X = 12-bit zr for ztable lookup
 	lda f:pv_ztable, X
 	sta a:$4202 ; WRMPYA = z (spurious write to $4303)
-	nop
 	nop ; needed because writing $4303 again too fast will cause an erroneous result
 	; scale a
 	ldx z:pv_scale+0
@@ -2581,7 +2580,6 @@ pv_abcd_lines_sa1_: ; SA=1 means d=a and c=-b: ~1210 clocks per line
 	tax
 	lda f:pv_ztable, X
 	sta a:$4202
-	nop
 	nop ; delay for next $4203
 	; scale a/d
 	ldx z:pv_scale+0
@@ -2651,7 +2649,6 @@ pv_abcd_lines_angle0_: ; angle 0 means a/d are positive and b=c=0: ~970 clocks p
 	tax
 	lda f:pv_ztable, X
 	sta a:$4202
-	nop
 	nop ; delay for next $4203
 	; scale a
 	ldx z:pv_scale+0
