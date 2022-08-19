@@ -97,6 +97,10 @@ Diagram and its approximate in-game view:
 ![trapezoid viewing frustum on the texture map](frustum.png)
 ![approximate in-game view of the frustim](frustum_view.png)
 
+I also did an experiment increasing the precision of the inner loop calculation.
+It looks a little better, though it's not very suitable for 60fps gameplay.
+If you'd like to take a look, the branch with ROM is here: [16-bit precision test](../dizworld_16bit_precision/dizworld/#readme)
+
 Some useful links:
 * [NovaSquirrel Mode 7 Previewer](https://novasquirrel.github.io/Mode7Preview/) - an excellent webpage tool allowing you to write a javascipt program to generate a Mode 7 view per-scanline.
 * [Telinc1 Mode 7 Simulator](https://telinc1.github.io/mode7/) - a simpler webpage tool showing more directly how the Mode 7 registers operate.
