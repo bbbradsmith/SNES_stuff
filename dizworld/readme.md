@@ -1,10 +1,6 @@
 # Dizworld
 
-**___________________________________**
-
 **______ 16-bit Precision Test ______**
-
-**___________________________________**
 
 This branch is a test of using 16-bit precision instead of 8-bit for the
 inner-loop multiply. It is significantly slower than the original version,
@@ -18,13 +14,9 @@ to see how it looks.
 The most dramatic difference is where the extra precision prevents clamping in
 the demo X tilt and allows a wider value of SH.
 
-* ROM: [dizworld.sfc](../../../raw/dizword_16bit_precision/dizworld/dizworld.sfc)
+* ROM: [dizworld.sfc](../../../raw/dizworld_16bit_precision/dizworld/dizworld.sfc)
 
-**____________________________________**
-
-**__ Original documentation follows __**
-
-**____________________________________**
+**______ Original documentation follows ______**
 
 This is a demonstration of how to do a few practical Mode 7 effects for the SNES.
 
@@ -32,7 +24,7 @@ I wanted to show how these are written, and provide example code for anyone that
 If you find it helpful, please feel free to build on it, and let me know if you make anything cool.
 (See license below.)
 
-* ROM: [dizworld.sfc](../../../raw/dizword_16bit_precision/dizworld/dizworld.sfc)
+* ROM: [dizworld.sfc](../../../raw/dizworld_16bit_precision/dizworld/dizworld.sfc)
 * Website: [rainwarrior.ca](https://rainwarrior.ca)
 * Patreon: [rainwarrior](https://patreon.com/rainwarrior)
 
