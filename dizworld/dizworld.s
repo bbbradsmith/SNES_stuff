@@ -2178,7 +2178,7 @@ pv_rebuild:
 	tax
 	stx z:pv_negate
 	; generate scale (convert 8.8 cosa/sina to 1.7, prescale vertical by SA)
-	lda cosa
+	lda z:cosa
 	sta z:math_b
 	lsr
 	tax
@@ -2195,7 +2195,7 @@ pv_rebuild:
 		tax
 	:
 	stx z:pv_scale+3 ; scale D = SA * cos / 2
-	lda sina
+	lda z:sina
 	sta z:math_b
 	lsr
 	tax
