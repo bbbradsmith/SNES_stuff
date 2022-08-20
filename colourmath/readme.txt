@@ -7,6 +7,9 @@ in order to demonstrate a few ways to use SNES colour math.
 Simply press any button to cycle through the demo screens.
 Use a debugger to inspect them for more information.
 
+Some futher explanation is given at:
+  https://snes.nesdev.org/wiki/Color_math#Examples
+
 
 Modes:
 
