@@ -8,6 +8,10 @@ Patreon: [rainwarrior](https://patreon.com/rainwarrior)
 
 ## Demos
 
+* **[colourmath]](colourmath)** (2022-08-20)
+  * Demonstration of colour math uses
+  * ROM [colourmath.sfc](../../raw/main/colourmath/colourmath.sfc)
+
 * **[dizworld](dizworld)** (2022-08-17)
   * Demonstration of practical uses for Mode 7 graphics
   * ROM [dizworld.sfc](../../raw/main/dizworld/dizworld.sfc)
