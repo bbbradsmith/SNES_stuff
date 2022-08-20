@@ -13,9 +13,9 @@
 ;    (Same as 2 with darker ghost palette.)
 ; 4. subtract, "darkness, some sprites"
 ;    Main = BG + OBJ
-;    Sub  = Darkness
+;    Sub  = Inverse Darkness
 ; 5. subtract inverse, "darkness, all sprites"
-;    Main = Inverse Darkness
+;    Main = Darkness
 ;    Sub  = Inverse BG + Inverse OBJ
 ;
 ; rainwarrior 2022
