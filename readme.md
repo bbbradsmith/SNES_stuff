@@ -8,7 +8,7 @@ Patreon: [rainwarrior](https://patreon.com/rainwarrior)
 
 ## Demos
 
-* **[colourmath]](colourmath)** (2022-08-20)
+* **[colourmath](colourmath)** (2022-08-20)
   * Demonstration of colour math uses
   * ROM [colourmath.sfc](../../raw/main/colourmath/colourmath.sfc)
 
