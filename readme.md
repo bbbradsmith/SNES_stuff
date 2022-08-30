@@ -8,6 +8,10 @@ Patreon: [rainwarrior](https://patreon.com/rainwarrior)
 
 ## Demos
 
+* **[palcycle](palcycle)** (2022-08-30)
+  * Demonstration of 256-colour palette cycling
+  * ROM [palcycle.sfc](../../raw/main/palcycle/palcycle.sfc)
+
 * **[colourmath](colourmath)** (2022-08-20)
   * Demonstration of colour math uses
   * ROM [colourmath.sfc](../../raw/main/colourmath/colourmath.sfc)

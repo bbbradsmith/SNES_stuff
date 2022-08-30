@@ -12,3 +12,7 @@ elasticity/residual*.png
 multest/cc65
 extbgtest/cc65
 colourmath/cc65
+palcycle/cc65
+palcycle/ferrari
+palcycle/ferrari.bin
+palcycle/palcycle_ferrari.sfc
