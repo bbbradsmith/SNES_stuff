@@ -38,6 +38,7 @@ Modes:
 Rebuild requirements:
 cc65 - put it in a cc65 folder and run build.bat
 python 3 - gfx.py will rebuild the chr/pal/nmt assets (optional)
+pillow - python image library needed for gfx.py
 
 
 == Art ==

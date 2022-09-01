@@ -27,8 +27,9 @@ Expected results:
 
 
 Rebuild requirements:
-python 3 - gfx.py will rebuild the chr/pal assets
 cc65 - put it in a cc65 folder and run build.bat
+python 3 - gfx.py will rebuild the chr/pal assets
+pillow - python image library needed for gfx.py
 
 
 rainwarrior 2022

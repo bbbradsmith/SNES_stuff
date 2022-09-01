@@ -41,6 +41,7 @@ attribute region constraints.
 Rebuild requirements:
 cc65 - put it in a cc65 folder and run build.bat
 python 3 - gfx.py will rebuild the chr/pal assets (optional)
+pillow - python image library needed for gfx.py
 
 
 rainwarrior, 2022

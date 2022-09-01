@@ -6,8 +6,10 @@ Press B/A to toggle between Mode 1 non-interlaced and Mode 5 interlaced,
 demonstrating standard resolution and then doubled in both axes.
 
 Rebuild requirements:
-python 3 - gfx.py will rebuild the chr/pal/nmt assets
 cc65 - put it in a cc65 folder and run build.bat
+python 3 - gfx.py will rebuild the chr/pal/nmt assets
+pillow - python image library needed for gfx.py
+
 
 Notes:
 https://forums.nesdev.org/viewtopic.php?p=279303
