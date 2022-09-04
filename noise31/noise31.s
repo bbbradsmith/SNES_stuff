@@ -117,13 +117,14 @@ reset:
 :
 	lda #$0000
 	tcd ; set DP to zero page
-	; "standard" init
 	sep #$30
 	.a8
 	.i8
 	lda #$8f
-	sta a:$2100
-	; use BIOS loader to load the SPC code
+	sta a:$2100 ; force blank
+	;
+	; use BIOS loader to load and run the SPC code
+	;
 	rep #$10
 	.i16
 	; wait for warmup signal AABB
@@ -167,6 +168,8 @@ reset:
 	inc
 	inc
 	sta $2140
+	;
 	; done, infinite loop
+	;
 :
 	bra :-
