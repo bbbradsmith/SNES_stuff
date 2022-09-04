@@ -8,6 +8,10 @@ Patreon: [rainwarrior](https://patreon.com/rainwarrior)
 
 ## Demos
 
+* **[noise31](noise31)** (2022-09-04)
+  * Minimal SPC-700 sound example, plays noise loudly
+  * ROM [noise31.sfc](../../raw/main/noise31/noise31.sfc)
+
 * **[palcycle](palcycle)** (2022-08-30)
   * Demonstration of 256-colour palette cycling
   * ROM [palcycle.sfc](../../raw/main/palcycle/palcycle.sfc)
