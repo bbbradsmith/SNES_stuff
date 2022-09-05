@@ -40,3 +40,26 @@ Patreon: [rainwarrior](https://patreon.com/rainwarrior)
 * **[elasticity](elasticity)** (2022-05-05)
   * Demonstration of high colour graphics.
   * ROM: [elasticity.sfc](../../raw/main/elasticity/elasticity.sfc)
+
+## Required Tools
+
+You can download and run the ROMs in an emulator, or with a flash cart, but rebuilding them may require some of the following tools:
+
+* [cc65](https://cc65.github.io/)
+  * C compiler and assembler for 6502/65C816.
+  * Used for all projects.
+  * Download "windows snapshot".
+* [python 3](https://www.python.org/)
+* [Pillow](https://pillow.readthedocs.io/en/stable/installation.html#basic-installation)
+  * Python is programming language and script interpreter. Pillow is a library add-on for working with images.
+  * Used for optional utility scripts in most projects, especially for rebuilding art data from PNG image sources.
+  * Download and run python installer. Pillow is installed by running a python script (see installation instructions).
+* [wla-dx](https://github.com/vhelin/wla-dx/releases)
+  * Assembler for SPC-700.
+  * Used for projects that have sound.
+  * Download release.
+
+I build all of these projects under the Windows operating system, each with an included simple batch file script.
+
+The tools used are open source, and available for other operating systems,
+but if this is needed you will have to rewrite the batch scripts for yourself.
