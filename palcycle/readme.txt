@@ -4,6 +4,9 @@ SNES 256-Colour Palette Cycling Demo
 This is a simple ROM that loads some graphics and display them,
 in order to demonstrate 256-colour palette cycling.
 
+Video explanation:
+- https://www.youtube.com/watch?v=7LAY4ulp63Y
+
 
 Ideally I'd like to test this with Mark Ferrari's Living Worlds:
 - http://www.effectgames.com/demos/canvascycle/
