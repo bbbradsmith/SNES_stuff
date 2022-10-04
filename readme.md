@@ -8,6 +8,10 @@ Patreon: [rainwarrior](https://patreon.com/rainwarrior)
 
 ## Demos
 
+* **[iplfast](iplfast)** (2022-10-04)
+  * SPC-700 IPL fast loader
+  * ROM [iplfast.sfc](../../raw/main/iplfast/iplfast.sfc)
+
 * **[noise31](noise31)** (2022-09-04)
   * Minimal SPC-700 sound example, plays noise loudly
   * ROM [noise31.sfc](../../raw/main/noise31/noise31.sfc)
