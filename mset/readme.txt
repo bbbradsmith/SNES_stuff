@@ -1,6 +1,6 @@
 mset.nes
 SNES Mouse test, by Brad Smith 2019
-Updated for SNES: 2012
+Updated for SNES: 2022
 http://rainwarrior.ca
 
 Plug a SNES mouse (or equivalent) into either SNES port.
