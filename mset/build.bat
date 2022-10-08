@@ -16,6 +16,8 @@ cc65\bin\ca65 -o mset.o -g mset.s
 cc65\bin\ld65 -o mset.sfc -m mset.map --dbgfile mset.dbg -C mset.cfg mset.o mset.c.o runtime.lib
 @IF ERRORLEVEL 1 GOTO error
 
+python checksum.py LOROM mset.sfc
+
 @echo.
 @echo.
 @echo Build successful!
