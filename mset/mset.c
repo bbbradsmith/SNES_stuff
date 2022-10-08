@@ -54,7 +54,7 @@ extern sint8 mouse_x;
 #pragma zpsym("mouse_x")
 
 extern uint8 sprite_chr[];
-#define SPRITE_CHR_SIZE (16 * 3 * 16)
+#define SPRITE_CHR_SIZE (16 * 4 * 16)
 
 extern uint8 prng(); // 8-bit random value
 extern void mouse_sense(); // cycles sensitivity setting (doesn't work on Hyperkin clone)
@@ -223,6 +223,7 @@ void test()
 		ppu_send[8] = mouse4 >> 4;
 		ppu_send[9] = mouse4 & 0xF;
 		++line; if (line >= 24) line = 0;
+		for (i=0; i<10; ++i) ppu_send[i] ^= 0x30; // SNES grey
 		
 		add_hex_sprite(20*8,2*8,mouse0);
 		add_hex_sprite(22*8,3*8,mouse1);
