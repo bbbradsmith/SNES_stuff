@@ -10,15 +10,16 @@ Each frame strobes $4016, then reads 24 bits from each of the 2 data lines
 on $4016 and $4017.
 
 The bits are displayed left to right in a big-endian hexadecimal manner:
- 800000000000 = first bit
- 400000000000 = second bit
- 200000000000 = third bit
- 100000000000 = fourth bit
- 080000000000 = fifth bit
+ 800000 = first bit
+ 400000 = second bit
+ 200000 = third bit
+ 100000 = fourth bit
+ 080000 = fifth bit
  ...
- 008000000000 = ninth bit
- 000800000000 = thirteenth bit
- 000010000000 = sixteenth bit
+ 008000 = ninth bit
+ 000800 = thirteenth bit
+ 000100 = sixteenth bit
+ 000001 = twenty-fourth bit
 
 This is suitable for reading controllers that report up to 24 bits on any of
 the data lines. Devices that need longer reports, such as
