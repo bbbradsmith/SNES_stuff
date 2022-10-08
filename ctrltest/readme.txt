@@ -3,6 +3,7 @@ Brad Smith, 2020
 Adapted for SNES: 2022
 
 ctrltest.sfc
+ctrltest_auto.sfc
 
 This is a simple test ROM to check the controller input lines on SNES.
 
@@ -25,6 +26,11 @@ This is suitable for reading controllers that report up to 24 bits on any of
 the data lines. Devices that need longer reports, such as
 the SNES mouse are less suitable for these test ROMs, though you still get
 the first 24 bits of their report.
+
+
+The "auto" variation insted uses controller automatic read and displays the
+16-bit report from each of the four SNES registers (little-endian byte order).
+
 
 Related: MSET test ROM for SNES mouse
 https://github.com/bbbradsmith/SNES_stuff/tree/main/mset

@@ -27,3 +27,4 @@ mset/mset.nes
 mset/mset.c.pre.txt
 ctrltest/cc65
 ctrltest/ctrltest.c.s
+ctrltest/ctrltest_auto.c.s
