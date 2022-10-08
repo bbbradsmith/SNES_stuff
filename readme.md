@@ -47,11 +47,11 @@ Patreon: [rainwarrior](https://patreon.com/rainwarrior)
   * ROM: [extbgtest.sfc](../../raw/main/extbgtest/extbgtest.sfc)
 
 * **[twoship](twoship)** (2022-05-19)
-  * Demonstration of high resolution Mode 5 graphics.
+  * Demonstration of high resolution Mode 5 graphics
   * ROM: [twoship.sfc](../../raw/main/twoship/twoship.sfc)
 
 * **[elasticity](elasticity)** (2022-05-05)
-  * Demonstration of high colour graphics.
+  * Demonstration of high colour graphics
   * ROM: [elasticity.sfc](../../raw/main/elasticity/elasticity.sfc)
 
 ## Required Tools
