@@ -110,7 +110,7 @@ input_poll_raw_strobed:
 		pha
 		rol _input+8
 		rol _input+7
-		rol _input+7
+		rol _input+6
 		pla
 		lsr
 		rol _input+11
