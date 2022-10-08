@@ -8,6 +8,10 @@ Patreon: [rainwarrior](https://patreon.com/rainwarrior)
 
 ## Demos
 
+* **[ctrltest](ctrltest)** (2022-10-08)
+  * SNES generic controller test
+  * ROM [ctrltest.sfc](../../raw/main/ctrltest/ctrltest.sfc)
+
 * **[mset](mset)** (2022-10-08)
   * SNES Mouse test
   * ROM [mset.sfc](../../raw/main/mset/mset.sfc)

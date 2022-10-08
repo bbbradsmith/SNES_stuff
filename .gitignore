@@ -25,3 +25,5 @@ mset/cc65
 mset/mset.c.s
 mset/mset.nes
 mset/mset.c.pre.txt
+ctrltest/cc65
+ctrltest/ctrltest.c.s
