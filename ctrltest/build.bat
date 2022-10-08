@@ -29,6 +29,8 @@ cc65\bin\ca65 -o ctrltest_auto.o -g ctrltest_auto.s
 cc65\bin\ld65 -o ctrltest_auto.sfc -m ctrltest_auto.map --dbgfile ctrltest_auto.dbg -C ctrltest.cfg ctrltest_auto.o ctrltest_auto.c.o runtime.lib
 @IF ERRORLEVEL 1 GOTO error
 
+python checksum.py LOROM ctrltest.sfc
+
 python checksum.py LOROM ctrltest_auto.sfc
 
 @echo.
