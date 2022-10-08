@@ -21,3 +21,7 @@ noise31/wla-dx
 noise31/spc.bin
 iplfast/cc65
 iplfast/wla-dx
+mset/cc65
+mset/mset.c.s
+mset/mset.nes
+mset/mset.c.pre.txt

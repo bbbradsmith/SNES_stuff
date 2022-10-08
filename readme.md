@@ -8,6 +8,10 @@ Patreon: [rainwarrior](https://patreon.com/rainwarrior)
 
 ## Demos
 
+* **[mset](mset)** (2022-10-08)
+  * SNES Mouse test
+  * ROM [mset.sfc](../../raw/main/mset/mset.sfc)
+
 * **[iplfast](iplfast)** (2022-10-04)
   * SPC-700 IPL fast loader
   * ROM [iplfast.sfc](../../raw/main/iplfast/iplfast.sfc)
