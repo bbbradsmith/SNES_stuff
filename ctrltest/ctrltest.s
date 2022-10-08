@@ -79,45 +79,37 @@ _sprite_chr: .incbin "sprite.chr"
 ; =========
 
 .export _input_poll
+.export _strobe_4016
 
 .segment "CODE"
 
+_strobe_4016:
+	sta $4016
+	rts
+
 _input_poll:
-	; strobe
-	ldy #1
-	sty $4016
-	dey
-	sty $4016
-	; read 3 bytes each from 4 data lines
-input_poll_raw_strobed:
-	ldx #0
-@poll_byte:
-	ldy #24
+	; autoread finish
 	:
-		lda $4016
-		lsr
-		pha
-		rol _input+2
-		rol _input+1
-		rol _input+0
-		pla
-		lsr
-		rol _input+5
-		rol _input+4
-		rol _input+3
-		lda $4017
-		lsr
-		pha
-		rol _input+8
-		rol _input+7
-		rol _input+6
-		pla
-		lsr
-		rol _input+11
-		rol _input+10
-		rol _input+9
-		dey
+		lda $4212
+		and #1
 		bne :-
+	; copy autoread result
+	lda $4218
+	sta _input+0
+	lda $4219
+	sta _input+1
+	lda $421A
+	sta _input+2
+	lda $421B
+	sta _input+3
+	lda $421C
+	sta _input+4
+	lda $421D
+	sta _input+5
+	lda $421E
+	sta _input+6
+	lda $421F
+	sta _input+7
 	rts
 
 ; =====================
@@ -544,7 +536,8 @@ snes_oam: .res 256
 	sta a:$2105 ; BGMODE mode 1
 	stz a:$2115 ; VMAIN default increment on $2118
 	; begin
-	lda #$80 ; NMI on, automatic joypad off (will be turned on by _input_setup)
+	;lda #$80 ; NMI on, automatic joypad off (will be turned on by _input_setup)
+	lda #$81 ; NMI on, autoread on
 	sta a:$4200 ; NMITIMEN turn on NMI
 	rts
 .endproc

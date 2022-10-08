@@ -29,6 +29,7 @@ extern uint8 sprite_chr[];
 #define SPRITE_CHR_SIZE (16 * 3 * 16)
 
 extern uint8 prng(); // 8-bit random value
+extern void strobe_4016(uint8 v);
 extern void input_poll();
 
 extern void ppu_latch(uint16 addr); // write address to PPU latch
@@ -68,6 +69,8 @@ void cls() // erase nametables
 uint8 line = 0;
 uint8 oam_pos = 0;
 
+uint8 strobing = 0;
+
 void add_sprite(uint8 x, uint8 y, uint8 tile, uint8 attributes)
 {
 	oam[oam_pos+0] = y-1;
@@ -84,10 +87,10 @@ void add_hex_sprite(uint8 x, uint8 y, uint8 value)
 }
 
 const uint8 heading[] = {
-	0, 0xFF, 4, 0, 1, 6, 0xFF,
-	1, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
-	0, 0xFF, 4, 0, 1, 7, 0xFF,
-	1, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+	4,2,1,0x8,0xFF,0xFF,
+	4,2,1,0xA,0xFF,0xFf,
+	4,2,1,0xC,0xFF,0xFF,
+	4,2,1,0xE,0xFF,0xFf,
 };
 
 void test()
@@ -112,20 +115,29 @@ void test()
 	{
 		input_poll();
 		
+		if (input[0] & 0x80 && strobing==0) // A button enables strobe for 4 seconds
+		{
+			strobe_4016(1);
+			strobing = 240;
+		}
+		if (strobing > 0)
+		{
+			--strobing;
+			if (strobing == 0) strobe_4016(0);
+		}
+		
 		oam_pos = 0;
 
 		add_sprite(1*8,(4+line)*8,0x11,0x40);
 		ppu_send_addr = 0x2000 + 2 + ((4+line) * 32);
-		ppu_send_count = 24+3;
-		for (i=0; i<12; ++i)
+		ppu_send_count = 24;
+		for (i=0; i<24; ++i) ppu_send[i] = 0xFF;
+		for (i=0; i<8; ++i)
 		{
-			j = i/3;
-			ppu_send[i*2+0+j] = input[i] >> 4;
-			ppu_send[i*2+1+j] = input[i] & 0x0F;
+			j = i/2;
+			ppu_send[i*2+0+(j*2)] = input[i] >> 4;
+			ppu_send[i*2+1+(j*2)] = input[i] & 0x0F;
 		}
-		ppu_send[ 6+0] = 0xFF;
-		ppu_send[12+1] = 0xFF;
-		ppu_send[18+2] = 0xFF;
 		++line; if (line >= 24) line = 0;
 		
 		while (oam_pos != 0)

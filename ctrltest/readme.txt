@@ -2,7 +2,18 @@ CTRLTEST
 Brad Smith, 2020
 Adapted for SNES: 2022
 
-ctrltest.sfc
+=====================
+UNSTROBE MODIFICATION
+
+This is a test of the state of $4016 on auto read.
+It displays auto-read continually, but if you press A on controller 1,
+$4016 will be written with 1 and left on for 4 seconds.
+You may observe that the controllers are stuck on their B button for this time.
+
+(When stuck: pressing B button will report FFFF otherwise 0000)
+=====================
+
+ctrltest_unstrobe.sfc
 
 This is a simple test ROM to check the controller input lines on SNES.
 
