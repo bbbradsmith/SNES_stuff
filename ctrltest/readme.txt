@@ -4,7 +4,7 @@ Adapted for SNES: 2022
 
 ctrltest.sfc
 ctrltest_auto.sfc
-ctrltest_simple.sft
+ctrltest_simple.sfc
 
 - CTRLTEST: 24-bit read from all 4 data lines
 - CTRLTEST_AUTO: 16-bit auto-read from all 4 data lines (little-endian)
@@ -47,6 +47,7 @@ NES version of CTRLTEST:
 https://forums.nesdev.org/viewtopic.php?f=2&t=19752
 
 Built with cc65
+https://cc65.github.io/
 
 
 Brad Smith
