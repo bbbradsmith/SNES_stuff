@@ -710,7 +710,7 @@ reset_stub:
 
 .segment "HEADER"
 
-.byte "MSET                 "
+.byte "CTRLTEST             "
 .byte $20 ; map mode 0, SlowROM
 .byte $00 ; cartridge type (ROM only)
 .byte $05 ; 32kb / 0.25 mbit
