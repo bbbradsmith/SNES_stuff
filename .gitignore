@@ -29,3 +29,4 @@ ctrltest/cc65
 ctrltest/ctrltest.c.s
 ctrltest/ctrltest_auto.c.s
 ctrltest/ctrltest_simple.c.s
+smalltext/cc65
